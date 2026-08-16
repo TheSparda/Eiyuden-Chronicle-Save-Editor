@@ -5,6 +5,13 @@ Heroes* (Steam) — quality-of-life fixes, each one toggleable in a plain-text c
 
 ## Install
 
+Don't want to build from source? [`dist/`](dist/) has a ready-to-use package — grab
+`dist/plugins/SpardaECFixes/SpardaECFixes.dll` and follow [`dist/INSTALL.txt`](dist/INSTALL.txt).
+It's a plain-language walkthrough meant to also work for someone who's never used
+BepInEx before.
+
+Building it yourself instead:
+
 1. You need [BepInEx](https://github.com/BepInEx/BepInEx) (IL2CPP build) already set up
    for the game — if you're running any other mod, you already have this.
 2. Drop `SpardaECFixes.dll` into `BepInEx/plugins/SpardaECFixes/`.
@@ -13,9 +20,12 @@ Heroes* (Steam) — quality-of-life fixes, each one toggleable in a plain-text c
 
 Nothing modifies your save files — this only changes in-game behavior while running.
 
+`dist/` is a manually-updated snapshot, not rebuilt automatically — see [Building from
+source](#building-from-source) if you want the exact latest code instead.
+
 ## Features
 
-Six fixes so far, each independently toggleable. See
+Eight fixes so far, each independently toggleable. See
 [SUPPORT_ABILITIES.md](SUPPORT_ABILITIES.md) for the full list of all 26 support units,
 their character ids, and which ones these fixes cover.
 
@@ -49,25 +59,32 @@ not something reachable at a normal method boundary.
 
 **Config:**
 ```
-AlwaysHaveRohanHealBonus = true
+AlwaysHaveRohanHealBonus = false
 RohanHealMinimumPercent = 20
 ```
-(native code patch — **restart the game to change either setting**, see [How it
-works](#always-have-rohan-heal-bonus-1))
+(off by default — native code patch, **restart the game to change either setting**, see
+[How it works](#always-have-rohan-heal-bonus-1))
 
 Guarantees at least `RohanHealMinimumPercent`% of the party's HP is restored after every
 battle — Rohan's own ability grants 20%, but this can be set to any value 0–100. Never
 lowers a heal that would already be bigger; only raises one below the minimum.
 
+**Known issue:** testing showed this one applies without any error, but doesn't produce
+a visible heal in-game (tried at `RohanHealMinimumPercent = 100`, expecting an obvious
+full heal). The patch targets the same method the community CT itself targets and the
+clamp logic has been verified byte-for-byte against Iced, so the mechanism itself isn't
+provably wrong — but something between the clamp and the actual HP change isn't having
+the intended effect. Not yet root-caused; leave this off until it is.
+
 ### Random Support Skills Always Activate
 
 **Config:**
 ```
-RandomSupportSkillsAlwaysActivate = true
+RandomSupportSkillsAlwaysActivate = false
 RandomSupportSkillChancePercent = 100
 ```
-(native code patch — **restart the game to toggle the feature itself**, but
-`RandomSupportSkillChancePercent` is read fresh on every check and takes effect
+(off by default — native code patch, **restart the game to toggle the feature itself**,
+but `RandomSupportSkillChancePercent` is read fresh on every check and takes effect
 immediately, no restart needed for that one — see [How it
 works](#random-support-skills-always-activate-1))
 
@@ -77,6 +94,11 @@ battle" ability. This overrides the trigger chance to `RandomSupportSkillChanceP
 the number in the config is the exact probability, not a bonus. 100 (default) means
 always; 0 means never. Only takes effect when a support unit with a valid skill is
 actually assigned — see the next fix if you don't want to assign one.
+
+Disabled by default pending re-verification: this fix's diagnostic logging surfaced a
+real call-collision bug affecting every managed callback in this plugin (see [Any Row
+Attacks](#any-row-attacks-1) for the full story), which has since been fixed, but this
+specific fix hasn't been re-tested since.
 
 ### Large Units Take One Party Slot
 
@@ -91,10 +113,10 @@ no meaningful body to preserve.
 
 **Config:**
 ```
-DefaultSupportUnitWhenBlank = true
+DefaultSupportUnitWhenBlank = false
 DefaultSupportUnitId = 70
 ```
-(ordinary Harmony patch, no restart needed)
+(off by default — ordinary Harmony patch, no restart needed)
 
 If you haven't assigned any support unit at all, treats `DefaultSupportUnitId` (defaults
 to Perrielle, 70 — the community CT's own choice) as assigned, so the fixes above have
@@ -108,6 +130,27 @@ patches turned out to be unrelated to the actual support-unit assignment (see [W
 this could stop working](#when-this-could-stop-working)). A proper fix requires either
 finding a real managed path to the live save-data instance or replicating the CT's own
 native pointer-chase, and hasn't landed yet.
+
+### Any Row Attacks
+
+**Config:** `[Fixes] AnyRowAttacks = true` (on by default — restart to change)
+
+Lets any of your units attack any enemy regardless of front/back row. Enemies still
+follow normal row restrictions — against you, and against each other — since the fix
+only forces the check true when the unit involved is specifically one of yours (see
+[How it works](#any-row-attacks-1) for how that's determined). Applied as five
+ally-conditional native code patches plus a small shared ally-tracking mechanism (see
+[How it works](#any-row-attacks-1)); confirmed working across multiple full battles,
+including enemy turns, with no crashes or hangs.
+
+### Can Equip Anything
+
+**Config:** `[Fixes] CanEquipAnything = true` (on by default — restart to change)
+
+Any character can equip any piece of gear, including shields normally restricted to
+certain characters. Applied as two full-function replacements (always "yes, equippable")
+matching the CT's own design exactly — see [How it
+works](#can-equip-anything-1).
 
 ## How it works
 
@@ -276,6 +319,122 @@ body in place — `xor eax,eax` / `ret` (always "not large") — after verifying
 scans for. No trampoline, no allocation: the replacement is short enough to fit directly
 in the matched region, padded with NOPs.
 
+### Any Row Attacks
+
+By far the largest fix in this file, and the one with the longest failure history —
+worth documenting in full since every failure taught something.
+
+**The ally-tracking mechanism.** The CT's own row-attack fix depends on a shared
+`CurrentBattleUnitList`/`TotalBattleUnits` table the CT populates via a *separate* base
+entry ("Activate Trainer 2.2"), not part of the row-attack cheat itself. Nothing in this
+plugin replicated that until this fix needed it, so it's built here as three native
+hooks matching the CT's own three exactly:
+
+1. **Reset** — a module-wide byte scan (no named method; the CT finds it the same way,
+   via `aobscanmodule` against the whole `GameAssembly.dll`) hooks a point early in
+   battle setup and zeroes the tracked count and array.
+2. **Append** — another module-wide scan hooks the per-unit loop that follows, appending
+   each unit pointer as it's processed. Includes a bounds check the CT's own script
+   doesn't have: the CT's append logic writes `CurrentBattleUnitList[TotalBattleUnits]`
+   and increments unconditionally, capped only by the *reset* loop's 24-slot bound — if
+   append ever outpaces reset, the write walks past the array into adjacent scratch
+   memory. A real crash traced to exactly this (see below) is why this fix adds the
+   check the CT is missing.
+3. **Reset again** — hooked into `Battle.Context.Terminate` (a real, named method, unlike
+   the other two) so stale pointers from a finished battle are never mistaken for allies
+   in the next one.
+
+**The five row-attack checks themselves.** Match the CT's own AOB1–AOB5 shapes exactly:
+three check the *caller* (ally found → return true), two check the *target* with
+inverted logic (ally found → fall through to normal restrictions, e.g. for heals; NOT
+found, i.e. an enemy → return true). A sixth CT target, `GetSkillRange`, is deliberately
+left unpatched — an early attempt at patching it returned a synthetic range object and
+softlocked the turn resolver, and nothing here or in the CT itself suggests that one is
+safe to blanket-patch the way the other five are.
+
+**Failure history, because there were four distinct root causes across this many
+attempts:**
+
+- **v1 (unconditional true).** The very first version made all five methods
+  unconditionally return true for every unit — ally or enemy. Far bigger a change than
+  the CT makes (which only forces true for allies specifically), and the likely reason
+  `GetSkillRange` softlocked and the rest didn't cleanly resemble the CT's intended
+  behavior. Superseded by the ally-conditional version this section describes.
+- **v2 (crash from an oversized overwrite).** The reset hook's redirect overwrote the
+  *entire* 18-byte matched region, where the CT's own script overwrites only 5 bytes and
+  leaves the rest of that region — including the final `mov r10,[rsi]` instruction —
+  physically untouched. Reproduced a crash at the exact same instruction every time
+  (`movzx edx,[r10+0x12A]` dereferencing a corrupted `r10`), traced with a hand-rolled
+  minidump parser (no debugger was available on the dev machine) back to that
+  instruction executing with a register clobbered by the oversized overwrite. Fixed by
+  matching the CT's actual resume point (15 bytes, not 18) instead of just its replayed
+  byte *count*.
+- **v3 (a real call-collision bug, affecting every managed callback in this file, not
+  just this fix).** Diagnostic logging was added via `call [rip+0]` with the target
+  pointer inlined immediately after the instruction — the same pattern used elsewhere in
+  this file. That pattern has a serious bug: a RIP-relative call with a zero
+  displacement computes its own return address the same way it computes the memory
+  operand's effective address (both are "address right after this instruction"), so the
+  two are identical. The callee's `ret` lands on the pointer bytes and tries to execute
+  them as code instead of continuing normally. Manifested as inconsistent crash types
+  across different launches (ASLR changes what garbage gets executed each time). Fixed
+  by switching every such call site in this file to load the target into a register and
+  use a register-direct call instead, which has no such collision.
+- **v4 (calling into managed code from the hot path at all).** Even after fixing the
+  collision bug, a *later* invocation of the same diagnostic call crashed inside
+  `coreclr.dll` itself — the .NET runtime, not game code — after at least one earlier
+  call from the same trampoline had already logged successfully. That's not a
+  byte-level mistake; it points at calling into managed code from arbitrary native call
+  sites scattered through the game's own execution not being GC-safe or thread-safe the
+  way Harmony's own IL2CPP patches are. Fixed by removing every managed call from the
+  row-attack hot path entirely: diagnostics are now a plain unmanaged ring buffer (a
+  write index plus a 256-entry buffer, pure native reads/writes, no calls), read out
+  later through an ordinary Harmony postfix on `GetSkillRange` — the same safe mechanism
+  every other managed touchpoint in this plugin already used successfully.
+- **v5 (wrong-method resolution — the actual root cause of the remaining softlocks).**
+  Every attempt so far resolved each of the five targets by scanning *every*
+  `NativeMethodInfoPtr_` field on `CommandValidation` for a byte-pattern match, the same
+  technique this plugin uses everywhere else in this file. That's safe when a method's
+  compiled prologue is distinctive, but two of these five targets —
+  `IsAttackableArea(ISceneUnit,RangeType,ILocationMap,MasterBundle)` and
+  `IsAttackableArea(ISceneUnit,IRestrictRule,ILocationMap,MasterBundle)` — compile to
+  prologues differing by exactly **one byte** (which register, `rsi` or `rdi`, gets
+  saved first). Confirmed via offline reflection against the game's own interop
+  assembly (no game launch needed) that Il2CppInterop names each method's native-info
+  field with its *full parameter list* baked in — e.g.
+  `NativeMethodInfoPtr_IsAttackableArea_Public_Static_Boolean_ISceneUnit_RangeType_
+  ILocationMap_MasterBundle_0` — which is exactly the same unambiguous
+  assembly+class+method+parameter-types identification the CT's own
+  `findMethodAddrBySignature` uses, just expressed as a field-name match instead of
+  Cheat Engine's own metadata API. Switching to that resolved a *different* address for
+  one of the five targets than the byte-scan had been finding — confirming the byte-scan
+  really had been resolving the wrong method, likely corrupting unrelated validation
+  logic and explaining the softlocks that had no relationship to anything in the
+  row-attack logic itself. This is the fix that finally made the feature stable across
+  multiple full battles, including enemy turns.
+
+Every hand-built trampoline byte sequence for this fix (and the ally-tracking hooks) was
+verified against [Iced](https://github.com/icedland/iced) (a well-known .NET x86-64
+disassembler) in a throwaway scratch console project before ever touching a real
+process — decoding the exact bytes back to readable assembly and confirming each
+instruction matches intent. That caught several real encoding mistakes (a hand-counted
+jump offset that was 2 bytes short, a backwards register encoding, a missing `REX.W`
+bit) before they ever reached the game. Given this fix's history, that offline check is
+worth doing for any future patch this structurally involved.
+
+### Can Equip Anything
+
+The simplest fix in this file. Two full-function replacements, matching the CT's own
+`newmem`/`newmem2` exactly (`xor rax,rax` / `mov al,1` / `ret` — always "yes,
+equippable"), targeting `Common.EquipCategoryExtension.HasCategory` and
+`UnitEquipmentUtility.IsEquippable`. Both resolved by plain name (`ResolveNativeCode`,
+the same technique used for every single-overload method in this file) rather than the
+field-name matching Any Row Attacks needs — confirmed via the same offline reflection
+check that both methods have exactly one overload each, so there's no ambiguity risk to
+guard against here. No trampoline, no allocation: both matched regions are comfortably
+larger than the 5-byte replacement, padded with NOPs, same shape as Large Units Take One
+Party Slot.
+
 ### When this could stop working
 
 The patch depends on that exact 13-byte instruction sequence existing somewhere in the
@@ -295,9 +454,13 @@ corruption, just a silent revert to vanilla behavior. Check
 `BepInEx/LogOutput.log` for that message if the fix seems to have stopped working.
 
 Every other native patch in this plugin (collection point bonus, Rohan's heal, random
-support skills, large units) is checked the same way — its own signature, its own scan
-range, same fail mode, same log-and-bail behavior — and degrades the same way: the
-feature quietly stops applying rather than anything breaking.
+support skills, large units, any row attacks, can equip anything) is checked the same
+way — its own
+signature, its own scan range, same fail mode, same log-and-bail behavior — and degrades
+the same way: the feature quietly stops applying rather than anything breaking. Any Row
+Attacks specifically resolves its five targets by exact field name rather than a
+byte-pattern scan (see its own section above for why), so it fails safe even earlier: a
+missing or renamed field is caught before any bytes are even read, let alone written.
 
 The one remaining Harmony-based fix (default support unit) degrades differently: if a
 game update renames or changes the signature of the `SupportUnitID` getter, Harmony

@@ -1,0 +1,54 @@
+SpardaECFixes — install guide
+==============================
+
+A small mod for Eiyuden Chronicle: Hundred Heroes (Steam) with several toggleable
+quality-of-life fixes, including:
+  - Organize your party at any save point (not just the base camp)
+  - Permanent +100% collection point bonus
+  - Large-size units take 1 party slot instead of 2
+  - Attack any enemy from any row (your side only — enemies keep normal rules)
+  - Equip any gear on any character, including shields
+
+1) Prerequisite: BepInEx
+------------------------
+You need BepInEx (the IL2CPP build) already installed for this game. If you're not
+sure, check whether your game folder already has a "BepInEx" subfolder — if it does,
+you're set. If not, get BepInEx here first and follow its own install instructions:
+
+    https://github.com/BepInEx/BepInEx/releases
+
+(grab a release tagged "IL2CPP" for your platform — this game is IL2CPP, not Mono).
+
+2) Install this mod
+--------------------
+Copy the "plugins" folder from this package into your game's "BepInEx" folder, merging
+it with what's already there. When done, you should have:
+
+    <your game folder>\BepInEx\plugins\SpardaECFixes\SpardaECFixes.dll
+
+3) First launch
+----------------
+Launch the game once. This generates a settings file at:
+
+    <your game folder>\BepInEx\config\sparda.eiyudenchronicle.ecfixes.cfg
+
+Open that file in any text editor to see every fix with a description and its current
+on/off setting (true/false). Most fixes need a game restart to take effect after you
+change them — each one's description says whether it does.
+
+Nothing this mod does touches your save files — only in-game behavior while running.
+
+4) Known issues (be aware before reporting a bug)
+---------------------------------------------------
+  - "AlwaysHaveRohanHealBonus" (heal a % of HP after every battle) is not yet confirmed
+    working — testing suggests the patch applies without error but may not actually be
+    healing. Leave it off (false) unless you want to help test it.
+  - "DefaultSupportUnitWhenBlank" is confirmed NOT working currently — leave it off.
+  - "RandomSupportSkillsAlwaysActivate" is disabled by default pending further testing.
+  - Everything else (party formation, collection bonus, large units, row attacks, equip
+    anything) has been tested and confirmed working across multiple play sessions.
+
+If something seems broken, checking BepInEx\LogOutput.log for lines starting with
+"[SpardaECFixes]" usually explains what happened — every fix in this mod fails safe
+(logs an error and changes nothing) rather than guessing when it can't find what it's
+looking for.
