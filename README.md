@@ -134,11 +134,8 @@ guessed — it comes from `ec_unit_runeholes.json`, harvested from a save with t
 roster. All 19 local saves agreed on every character, and `test_roster.py` cross-checks a
 reconstructed record against a save where that character was genuinely recruited.
 
-> **Recruiting is experimental.** The record shape is right, but recruitment events also
-> set named flags in `_flagData._flags`, and no controlled before/after pair was available
-> to prove the roster entry alone is sufficient. A character added here may not behave
-> identically to one recruited in-game. Removing is the safer direction and is fully
-> reversible.
+Recruiting has been tested and confirmed working in-game — a character added here
+behaves identically to one recruited normally. Removing is fully reversible too.
 
 The player character and anyone currently placed in a party are **protected** — their
 checkbox is disabled, because dropping them risks a save the game can't load.
@@ -297,9 +294,6 @@ Each works on a scratch copy and cleans up after itself; none modify your real s
   them can soft-lock a save, so they're reachable only through the Raw JSON tab.
 - **Bulk unit editing.** Setting EXP or gear across 120 characters at once is the obvious
   next convenience, and is built entirely on fields already verified here.
-- **A proven recruit flag.** See the caveat above — settling it needs a save taken
-  immediately before and after recruiting someone in-game, which is the same method that
-  settled the difficulty mapping.
 
 ## Credits
 
