@@ -90,3 +90,30 @@ slots = {str(i): c.most_common(1)[0][0] for i, c in sorted(slot_seen.items())}
 json.dump(slots, open(SLOT_OUT, "w", encoding="utf-8"), indent=0)
 print(f"wrote {SLOT_OUT} ({len(slots)} items seen equipped; "
       f"{len(conflicts)} appeared in more than one slot)")
+
+# --- per-character rune-hole count ------------------------------------------------
+# How many rune holes a character has is master data, fixed per character (Nowa 7,
+# Garr 4, and 49 units have none at all) -- it does not grow with level. A save with the
+# full roster therefore tells us the true count for everyone, which is what lets the
+# editor build an accurate record when recruiting someone into an earlier save.
+HOLES_OUT = os.path.join(HERE, "ec_unit_runeholes.json")
+holes = {}
+disagreements = collections.defaultdict(set)
+for save_dir in ecsave.find_save_dirs():
+    for s in ecsave.list_saves(save_dir):
+        try:
+            obj = ecsave.load_json(s["path"])
+        except Exception:
+            continue
+        for u in (obj.get("_unitData") or {}).get("_units") or []:
+            uid, n = u.get("_id"), len(u.get("_runeHoles") or [])
+            if uid is None:
+                continue
+            disagreements[uid].add(n)
+            holes[uid] = max(holes.get(uid, 0), n)
+
+bad = {k: sorted(v) for k, v in disagreements.items() if len(v) > 1}
+json.dump({str(k): v for k, v in sorted(holes.items())},
+          open(HOLES_OUT, "w", encoding="utf-8"), indent=0)
+print(f"wrote {HOLES_OUT} ({len(holes)} characters; "
+      f"{len(bad)} disagreed across saves{': ' + str(bad) if bad else ''})")

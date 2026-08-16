@@ -399,11 +399,166 @@ def summarize(obj):
         "population": town.get("_population"),
         "units": units,
         "items": items,
+        "roster": roster(obj),
+        "recruitedCount": len(recruited_ids(obj)),
+        "knownCount": len(UNIT_NAMES),
         "topLevelKeys": sorted(obj.keys()),
     }
 
 
 # --- editing --------------------------------------------------------------------
+# --- roster / recruitment --------------------------------------------------------
+# A character is "recruited" exactly when they have a record in _unitData._units: an
+# early save holds 6 entries, a completed one 120. The records are uniform (a single key
+# shape across all 120), so a new one can be built faithfully by copying an existing
+# record from the same save and neutralising the per-character progress.
+#
+# CAVEAT, and it is a real one: adding the record is not provably the whole of what the
+# game means by "recruited". Recruitment events also set named flags in _flagData._flags,
+# and no controlled before/after pair was available to prove whether the roster entry
+# alone is sufficient. Treat recruiting as experimental -- hence the warning in the UI and
+# the automatic backup. Removing a character is the safer direction and is fully reversible.
+
+UNIT_TEMPLATE = {
+    "_id": 0,
+    "_exp": 0,
+    "_hp": 0,
+    "_mp": 0,
+    "_weaponLevel": 1,
+    "_equipment": [0, 0, 0, 0],
+    "_invalidEquipOperation": False,
+    "_registState": 0,
+    "_organizeState": 0,
+    "_runeHoles": [],          # filled in per character -- see _rune_holes_for()
+    "_autoCommandPreset": {
+        "_prioritySet1": {"_priorityType": 1, "_active": True},
+        "_prioritySet2": {"_priorityType": 3, "_active": True},
+        "_prioritySet3": {"_priorityType": 3, "_active": True},
+        "_prioritySet4": {"_priorityType": 2, "_active": True},
+        "_restrictType": 1,
+        "_targetType": 1,
+    },
+    "_partyAssignedData": {"_secondsJoinedInParty": 0.0, "_secondsSpentAtParty": 0.0},
+    "_bathedHotSpringLevel": 0,
+    "_bathedRelaxPlaySeconds": 0.0,
+    "_isInherited": False,
+}
+
+
+# How many rune holes each character has. This is fixed master data, not something that
+# grows with level: harvested from every local save by build_names.py, 120 characters
+# agreed across all of them with no disagreement. A save with the full roster is what
+# makes an accurate record possible when recruiting into an earlier save.
+_HOLES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "ec_unit_runeholes.json")
+
+
+def _load_rune_holes():
+    try:
+        with open(_HOLES_PATH, encoding="utf-8") as f:
+            return {int(k): int(v) for k, v in json.load(f).items()}
+    except (OSError, ValueError):
+        return {}
+
+
+UNIT_RUNE_HOLES = _load_rune_holes()
+
+
+def _rune_holes_for(unit_id):
+    """A freshly recruited character's holes: the right number for them, with only the
+    first unlocked -- the pattern real early-game saves show."""
+    n = UNIT_RUNE_HOLES.get(unit_id)
+    if n is None:          # unknown character: empty is a shape the game already uses
+        return []
+    return [{"_itemId": 0, "_released": i == 0, "_isViewedReleaseEffect": i == 0}
+            for i in range(n)]
+
+
+def _units_of(obj):
+    return (obj.setdefault("_unitData", {})).setdefault("_units", [])
+
+
+def recruited_ids(obj):
+    return {u.get("_id") for u in _units_of(obj) if isinstance(u, dict)}
+
+
+def protected_ids(obj):
+    """Characters that must not be removed: the player character and anyone currently
+    placed in a party. Dropping these risks a save the game cannot load."""
+    keep = set()
+    pid = obj.get("_personalUnitId")
+    if pid is not None:
+        keep.add(pid)
+    for section in ("_heroParty",):
+        block = obj.get(section) or {}
+        for key in ("_partyUnitList", "_partyAttendantUnitList"):
+            for entry in block.get(key) or []:
+                if isinstance(entry, dict) and entry.get("_id") is not None:
+                    keep.add(entry["_id"])
+                elif isinstance(entry, int):
+                    keep.add(entry)
+        sup = block.get("_supportUnitID")
+        if isinstance(sup, int) and sup >= 0:
+            keep.add(sup)
+    stock = (obj.get("_unitData") or {}).get("_stockParty") or {}
+    for key in ("_partyUnitList", "_partyAttendantUnitList"):
+        for entry in stock.get(key) or []:
+            if isinstance(entry, dict) and entry.get("_id") is not None:
+                keep.add(entry["_id"])
+    return keep
+
+
+def roster(obj):
+    """Every known character with whether they are currently recruited."""
+    have = recruited_ids(obj)
+    guard = protected_ids(obj)
+    ids = set(UNIT_NAMES) | have
+    out = []
+    for uid in sorted(ids):
+        out.append({
+            "id": uid,
+            "name": unit_name(uid),
+            "recruited": uid in have,
+            "protected": uid in guard,
+            "known": uid in UNIT_NAMES,
+            "runeHoles": UNIT_RUNE_HOLES.get(uid),
+        })
+    return out
+
+
+def _new_unit_record(obj, unit_id):
+    """A record shaped exactly like the ones already in this save."""
+    existing = [u for u in _units_of(obj) if isinstance(u, dict)]
+    base = json.loads(json.dumps(existing[0])) if existing \
+        else json.loads(json.dumps(UNIT_TEMPLATE))
+    fresh = json.loads(json.dumps(UNIT_TEMPLATE))
+    # keep any keys this save's records carry that our template doesn't know about
+    for key in base:
+        if key not in fresh:
+            fresh[key] = base[key]
+    fresh["_id"] = int(unit_id)
+    fresh["_runeHoles"] = _rune_holes_for(int(unit_id))
+    return fresh
+
+
+def add_unit(obj, unit_id):
+    if unit_id in recruited_ids(obj):
+        return False
+    _units_of(obj).append(_new_unit_record(obj, unit_id))
+    return True
+
+
+def remove_unit(obj, unit_id):
+    if unit_id in protected_ids(obj):
+        raise ValueError(
+            f"{unit_name(unit_id)} is the player character or is placed in a party; "
+            "remove them from the party in-game first")
+    units = _units_of(obj)
+    before = len(units)
+    units[:] = [u for u in units if not (isinstance(u, dict) and u.get("_id") == unit_id)]
+    return len(units) != before
+
+
 def _coerce(value, kind):
     if kind is int:
         return int(value)
@@ -438,6 +593,17 @@ def apply_edits(obj, edits):
         for key in ("_fortressTownLevel", "_population"):
             if key in town_edits:
                 town[key] = int(town_edits[key])
+                changed += 1
+
+    # Recruitment runs before the per-unit edits below, so a newly added character can be
+    # edited in the same write; indices are recomputed from the updated list.
+    for uid, want in (edits.get("recruit") or {}).items():
+        uid = int(uid)
+        if want:
+            if add_unit(obj, uid):
+                changed += 1
+        else:
+            if remove_unit(obj, uid):
                 changed += 1
 
     diff_edits = edits.get("difficulty") or {}
@@ -515,6 +681,19 @@ def apply_edits(obj, edits):
     return changed
 
 
+def resolve_save(arg):
+    """Accept either a full path or a bare 'UserData7.dat' from the save folder."""
+    if os.path.exists(arg):
+        return arg
+    if not os.path.dirname(arg):
+        for d in find_save_dirs():
+            candidate = os.path.join(d, arg)
+            if os.path.exists(candidate):
+                return candidate
+    raise SystemExit(f"save not found: {arg}\n"
+                     f"(try `ecsave.py list` to see what's available)")
+
+
 if __name__ == "__main__":
     import sys
     if len(sys.argv) < 2:
@@ -523,6 +702,8 @@ if __name__ == "__main__":
         print("  ecsave.py show <UserDataN.dat>      # summary")
         print("  ecsave.py dump <UserDataN.dat> [out.json]")
         print("  ecsave.py pack <in.json> <UserDataN.dat>")
+        print()
+        print("Save arguments may be a bare filename or a full path.")
         sys.exit(1)
 
     cmd = sys.argv[1]
@@ -535,17 +716,18 @@ if __name__ == "__main__":
                 extra += f"  {pt//3600}h{(pt%3600)//60:02d}m" if isinstance(pt, int) else ""
                 print(f"   {s['name']:<20} {s['size']:>8} bytes{extra}")
     elif cmd == "show":
-        info = summarize(load_json(sys.argv[2]))
+        info = summarize(load_json(resolve_save(sys.argv[2])))
         print(json.dumps({k: v for k, v in info.items() if k != "topLevelKeys"},
                          indent=2)[:4000])
     elif cmd == "dump":
-        obj = load_json(sys.argv[2])
+        obj = load_json(resolve_save(sys.argv[2]))
         out = sys.argv[3] if len(sys.argv) > 3 else "save_decoded.json"
         json.dump(obj, open(out, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
         print("wrote", out)
     elif cmd == "pack":
         obj = json.load(open(sys.argv[2], encoding="utf-8"))
-        n = write_save(sys.argv[3], obj)
-        print(f"wrote {n} bytes to {sys.argv[3]} (backup at .bak)")
+        target = resolve_save(sys.argv[3])
+        n = write_save(target, obj)
+        print(f"wrote {n} bytes to {target} (backup at .bak)")
     else:
         print("unknown command:", cmd)

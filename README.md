@@ -28,7 +28,9 @@ Then open the printed `http://127.0.0.1:8751`.
 
 1. Pick a slot in the left-hand list (each is labelled with level, playtime and size,
    read from `UserDataInfo.dat`).
-2. Edit any exposed field, or switch to the **Raw JSON** tab for full control.
+2. Work through the tabs — **Overview** (money, playtime, difficulty, town),
+   **Characters** (roster + per-unit stats and gear), **Inventory**, or **Raw JSON** for
+   full control.
 3. Click **Write save**. A `.bak` is made before the first write to a file, the save is
    re-encrypted, and the result is decrypted again and compared before anything is
    replaced.
@@ -42,7 +44,8 @@ Then open the printed `http://127.0.0.1:8751`.
 | Progress | Money, playtime seconds, New Game+ count |
 | Difficulty | Normal / Hard, plus the five modifier toggles |
 | Fortress town | Town level, population |
-| Units | EXP, HP, MP, weapon level, 4 equipment slots, 7 rune slots |
+| Roster | See who is recruited and who is missing; recruit or remove characters |
+| Units | EXP, HP, MP, weapon level, 4 equipment slots, rune slots |
 | Inventory | Count, max, **add** new items, **remove** stacks |
 | Everything else | via the **Raw JSON** tab |
 
@@ -177,6 +180,28 @@ Nothing is ever truly locked out: the fields accept a raw id, so an unlisted ite
 still be entered deliberately. The filtering removes obviously-wrong categories without
 being able to block a legitimate edit.
 
+### Roster and recruitment
+
+A character is recruited exactly when they have a record in `_unitData._units` — an early
+save holds 6, a finished one 120. The **Characters** tab lists all 121 known characters
+with a checkbox each, filterable, with a *Recruit all*.
+
+When adding someone, the record written matches the game's own exactly: the same 15 keys,
+and **the right number of rune holes for that character**. Hole count is fixed per
+character (Nowa 7, Garr 4, and 49 characters have none), so it can't be guessed — it comes
+from `ec_unit_runeholes.json`, harvested from a save with the full roster. All 19 local
+saves agreed on every character, and a recruited record is cross-checked in the tests
+against a save where that character was genuinely recruited.
+
+> **Recruiting is experimental.** The record is shaped correctly, but recruitment events
+> also set named flags in `_flagData._flags`, and no controlled before/after pair was
+> available to prove whether the roster entry alone is sufficient. A character added here
+> may not behave identically to one recruited in-game. Removing is the safer direction and
+> is fully reversible.
+
+The player character and anyone currently placed in a party are **protected** — their
+checkbox is disabled, because dropping them risks a save the game cannot load.
+
 ### Name tables
 
 - **Items** (`ec_item_names.json`, 1142 entries) — extracted by `build_names.py` from the
@@ -214,6 +239,7 @@ ec_item_names.json         1142 item ids -> names
 ec_item_maxes.json         observed per-item stack maxima
 ec_equip_slots.json        observed item -> equipment slot
 ec_unit_names.json         121 unit ids -> character names
+ec_unit_runeholes.json     per-character rune-hole counts
 ```
 
 Not in the repo, by design: `dump/` (captured plaintext saves — they contain the player's

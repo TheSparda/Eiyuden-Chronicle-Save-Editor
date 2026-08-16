@@ -165,6 +165,20 @@ tr.added td{background:rgba(158,196,107,.12)}
 .hint{color:var(--muted);font-size:11px;margin-top:2px;font-style:italic}
 .chk{color:var(--fg)}
 
+/* roster */
+.rostergrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));
+  gap:2px 10px;margin-top:8px}
+.rost{display:flex;align-items:center;gap:6px;font-size:12px;padding:2px 4px;
+  border-radius:3px}
+.rost input{width:auto;margin:0;flex:0 0 auto}
+.rost.have{color:var(--fg)}
+.rost.miss{color:var(--muted)}
+.rost.locked{opacity:.55}
+.rost.changed{background:rgba(242,221,154,.14);outline:1px solid var(--gold-dim)}
+.rost .rid{color:var(--muted);font-size:10px;margin-left:auto}
+.rosterbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:6px}
+.rosterbar input[type=search]{width:190px}
+
 /* Steam Cloud state */
 .cloud{display:inline-block;margin-top:3px;padding:1px 7px;border-radius:99px;
   font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
@@ -241,6 +255,8 @@ textarea:focus{outline:none;border-color:var(--gold)}
   color:var(--gold-hi);border-color:var(--line2)}
 .note{color:var(--muted);font-size:12px;padding:0 14px 12px}
 .spin{color:var(--gold)}
+.subpane{display:none}
+.subpane.active{display:block}
 </style>
 
 <header>
@@ -268,7 +284,9 @@ textarea:focus{outline:none;border-color:var(--gold)}
   <div class="main">
     <div class="card">
       <div class="tabs">
-        <div class="tab active" data-t="edit">Editor</div>
+        <div class="tab active" data-t="meta">Overview</div>
+        <div class="tab" data-t="chars">Characters</div>
+        <div class="tab" data-t="inv">Inventory</div>
         <div class="tab" data-t="raw">Raw JSON</div>
       </div>
       <div id="pane-edit">
@@ -447,30 +465,31 @@ function cloudBanner(){
   const c = cloudOf(cur);
   if (!c) return "";
   if (c.state === "cloud-newer")
-    return `<div class="banner risk"><b>Steam Cloud is ahead of this file.</b>
+    return `<div class="banner risk" id="cloudbanner"><b>Steam Cloud is ahead of this file.</b>
       Launching the game may overwrite it — and any edit you make here.
       Consider disabling cloud saves for the game, or launching once to settle the
       conflict (choose the local copy) before editing.</div>`;
   if (c.state === "local-newer")
-    return `<div class="banner info"><b>Edited since Steam last synced.</b>
+    return `<div class="banner info" id="cloudbanner"><b>Edited since Steam last synced.</b>
       Start the game through Steam to upload it; if a Cloud Conflict dialog appears,
       pick the local / “Upload to Steam Cloud” option.</div>`;
   return "";
 }
 
-/* Replace just the cloud banner, leaving every edited field untouched. */
+/* Replace just the cloud banner, leaving every edited field untouched. Targeted by id so
+   it never disturbs the roster's own warning banner. */
 function refreshBanner(){
-  const ed = document.getElementById("editor");
-  if (!ed || !cur || !data) return;
-  const existing = ed.querySelector(":scope > .banner");
+  const host = document.getElementById("sp-meta");
+  if (!host || !cur || !data) return;
+  const existing = document.getElementById("cloudbanner");
   if (existing) existing.remove();
   const html = cloudBanner();
-  if (html) ed.insertAdjacentHTML("afterbegin", html);
+  if (html) host.insertAdjacentHTML("afterbegin", html);
 }
 
 function render(){
   const s = data.summary;
-  let h = cloudBanner() + `<div class="grid">
+  let h = `<div class="subpane active" id="sp-meta">` + cloudBanner() + `<div class="grid">
     ${num("f_money","Money",s.money)}
     ${num("f_seconds","Playtime (seconds)",s.seconds,"0.001")}
     ${num("f_town","Fortress town level",s.fortressTownLevel)}
@@ -502,6 +521,37 @@ function render(){
     </div>`;
 
   const SLOTS = ["Head","Body","Hands","Accessory"];
+
+  // --- Characters pane: roster + per-unit editing
+  h += `</div><div class="subpane" id="sp-chars">`;
+
+  h += `<h3 style="font-size:13px;color:var(--muted);margin:4px 0 6px">
+          ROSTER — ${s.recruitedCount} of ${s.knownCount} recruited</h3>
+    <div class="banner info"><b>Recruiting is experimental.</b>
+      A character counts as recruited by having a record in the save, and the record this
+      writes matches the game's own exactly — including the right number of rune holes for
+      that character. What is <i>not</i> proven is whether the game also expects a
+      recruitment flag elsewhere; a character added here may not behave identically to one
+      recruited in-game. A backup is made before writing.</div>
+    <div class="rosterbar">
+      <input type="search" id="rostfilter" placeholder="filter by name or id…">
+      <label class="chk"><input type="checkbox" id="rostonlymissing"> only missing</label>
+      <button class="ghost" type="button" id="rostall">Recruit all</button>
+      <button class="ghost" type="button" id="rostnone">Undo roster changes</button>
+      <span class="hint" id="rostnote"></span>
+    </div>
+    <div class="rostergrid" id="rostergrid">`;
+  for (const c of s.roster){
+    const cls = (c.recruited ? "have" : "miss") + (c.protected ? " locked" : "");
+    const holes = c.runeHoles == null ? "" : ` · ${c.runeHoles} rune slots`;
+    h += `<label class="rost ${cls}" data-rost="${c.id}"
+             title="${c.protected ? "In your party or the player character — remove in-game first"
+                                  : (c.name + holes)}">
+            <input type="checkbox" data-recruit="${c.id}"
+                   ${c.recruited ? "checked" : ""} ${c.protected ? "disabled" : ""}>
+            <span>${c.name}</span><span class="rid">${c.id}</span></label>`;
+  }
+  h += `</div>`;
 
   if (s.units.length){
     h += `<h3 style="font-size:13px;color:var(--muted);margin:18px 0 6px">
@@ -535,7 +585,9 @@ function render(){
     h += `</table></div>`;
   }
 
-  h += `<h3 style="font-size:13px;color:var(--muted);margin:18px 0 6px">
+  // --- Inventory pane
+  h += `</div><div class="subpane" id="sp-inv">`;
+  h += `<h3 style="font-size:13px;color:var(--muted);margin:4px 0 6px">
           INVENTORY (${s.items.length})</h3>
     <div class="additem">
       <div class="f"><label>Item</label>
@@ -554,7 +606,7 @@ function render(){
       <td><input class="narrow" type="number" data-i="${it.index}" data-k="_max" value="${it.max}"></td>
       <td><button class="rm" type="button" data-rm="${it.index}">remove</button></td></tr>`;
   }
-  h += `</table></div><div id="pendingadds"></div>`;
+  h += `</table></div><div id="pendingadds"></div></div>`;   // close table wrap + pane
 
   h += `<div class="bar"><button id="write">Write save</button>
         <button class="ghost" id="revertall">Revert all</button>
@@ -567,7 +619,72 @@ function render(){
   document.getElementById("reload").onclick = () => open(cur);
   document.getElementById("revertall").onclick = revertAll;
   wireInventory();
+  wireRoster();
   decorate();
+  showTab(activeTab === "raw" ? "meta" : activeTab);   // keep the tab across reloads
+}
+
+function wireRoster(){
+  const grid = document.getElementById("rostergrid");
+  if (!grid) return;
+
+  const mark = box => {
+    const row = box.closest(".rost");
+    const changed = String(box.checked) !== box.dataset.orig;
+    row.classList.toggle("changed", changed);
+    rosterNote();
+  };
+  grid.querySelectorAll("[data-recruit]").forEach(box => {
+    box.dataset.orig = String(box.checked);
+    box.addEventListener("change", () => mark(box));
+  });
+
+  const applyFilter = () => {
+    const q = (document.getElementById("rostfilter").value || "").toLowerCase().trim();
+    const onlyMissing = document.getElementById("rostonlymissing").checked;
+    grid.querySelectorAll(".rost").forEach(row => {
+      const box = row.querySelector("[data-recruit]");
+      const hay = row.textContent.toLowerCase();
+      const show = (!q || hay.includes(q)) && (!onlyMissing || !box.checked);
+      row.style.display = show ? "" : "none";
+    });
+  };
+  document.getElementById("rostfilter").addEventListener("input", applyFilter);
+  document.getElementById("rostonlymissing").addEventListener("change", applyFilter);
+
+  document.getElementById("rostall").onclick = () => {
+    grid.querySelectorAll("[data-recruit]:not(:disabled)").forEach(b => {
+      if (!b.checked){ b.checked = true; mark(b); }
+    });
+    applyFilter();
+  };
+  document.getElementById("rostnone").onclick = () => {
+    grid.querySelectorAll("[data-recruit]").forEach(b => {
+      b.checked = b.dataset.orig === "true";
+      b.closest(".rost").classList.remove("changed");
+    });
+    rosterNote();
+    applyFilter();
+  };
+  rosterNote();
+}
+
+function rosterChanges(){
+  const out = {};
+  document.querySelectorAll("[data-recruit]").forEach(b => {
+    if (String(b.checked) !== b.dataset.orig) out[b.dataset.recruit] = b.checked;
+  });
+  return out;
+}
+
+function rosterNote(){
+  const c = rosterChanges();
+  const add = Object.values(c).filter(Boolean).length;
+  const rem = Object.values(c).length - add;
+  const el = document.getElementById("rostnote");
+  if (el) el.textContent = (add || rem)
+    ? `${add} to recruit, ${rem} to remove` : "";
+  countDirty();
 }
 
 function wireInventory(){
@@ -626,15 +743,22 @@ function refresh(el, btn){
 }
 
 function countDirty(){
+  const rosterN = document.querySelectorAll("#editor .rost.changed").length;
   const n = document.querySelectorAll("#editor .dirty").length
-          + pendingRemove.size + pendingAdd.length;
+          + pendingRemove.size + pendingAdd.length + rosterN;
   const el = document.getElementById("dirtycount");
   if (el) el.textContent = n ? `${n} unsaved change${n>1?"s":""}` : "";
 }
 
+/* The roster grid does its own change tracking and has its own bulk controls, so it is
+   left out of the generic dirty/revert decoration -- 121 revert buttons in a checkbox
+   grid would be noise. Its filter controls aren't save data at all. */
+const SKIP_DECORATE = "[data-recruit],#rostfilter,#rostonlymissing";
+
 function decorate(){
   document.querySelectorAll("#editor input, #editor select").forEach(el => {
     if (el.dataset.orig !== undefined) return;
+    if (el.matches(SKIP_DECORATE)) return;
     el.dataset.orig = valOf(el);
 
     const ctl = document.createElement(el.type === "checkbox" ? "span" : "span");
@@ -694,6 +818,17 @@ function revertAll(){
     el.classList.remove("dirty");
   });
   document.querySelectorAll("#editor .revert").forEach(b => b.classList.remove("show"));
+  // roster, pending adds and pending removals are tracked separately
+  document.querySelectorAll("[data-recruit]").forEach(b => {
+    b.checked = b.dataset.orig === "true";
+    b.closest(".rost").classList.remove("changed");
+  });
+  pendingRemove = new Set();
+  pendingAdd = [];
+  document.querySelectorAll("tr.removed").forEach(r => r.classList.remove("removed"));
+  document.querySelectorAll("[data-rm]").forEach(b => b.textContent = "remove");
+  renderPendingAdds();
+  rosterNote();
   countDirty();
 }
 
@@ -737,7 +872,8 @@ function collect(){
 
   const removeItems = [...pendingRemove];
   const addItems = pendingAdd.map(a => ({_id: a._id, _count: a._count}));
-  return {top, town, units, items, difficulty, removeItems, addItems};
+  return {top, town, units, items, difficulty, removeItems, addItems,
+          recruit: rosterChanges()};
 }
 
 async function write(){
@@ -763,12 +899,25 @@ async function write(){
   btn.disabled = false;
 }
 
-document.querySelectorAll(".tab").forEach(t => t.onclick = () => {
-  document.querySelectorAll(".tab").forEach(x => x.classList.remove("active"));
-  t.classList.add("active");
-  document.getElementById("pane-edit").style.display = t.dataset.t==="edit"?"":"none";
-  document.getElementById("pane-raw").style.display  = t.dataset.t==="raw"?"":"none";
-});
+/* Overview / Characters / Inventory are sub-panes inside the editor (they share one
+   render and one Write bar); Raw JSON is a separate pane. */
+let activeTab = "meta";
+const SUBPANES = {meta: "sp-meta", chars: "sp-chars", inv: "sp-inv"};
+
+function showTab(name){
+  activeTab = name;
+  document.querySelectorAll(".tab").forEach(x =>
+    x.classList.toggle("active", x.dataset.t === name));
+  const isRaw = name === "raw";
+  document.getElementById("pane-edit").style.display = isRaw ? "none" : "";
+  document.getElementById("pane-raw").style.display  = isRaw ? "" : "none";
+  for (const [key, id] of Object.entries(SUBPANES)){
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle("active", key === name);
+  }
+}
+
+document.querySelectorAll(".tab").forEach(t => t.onclick = () => showTab(t.dataset.t));
 
 document.getElementById("writeraw").onclick = async () => {
   if (!cur) return alert("Open a save first.");
