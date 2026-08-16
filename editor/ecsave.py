@@ -139,14 +139,73 @@ def catalog():
                         for s in range(len(EQUIP_SLOT_LABELS))},
         "equipSlotLabels": EQUIP_SLOT_LABELS,
         "runes": rng(*RUNE_ID_RANGE),
-        "items": [{"id": i, "name": n, "max": item_max(i)}
+        "items": [{"id": i, "name": n, "max": item_max(i),
+                   "category": item_category(i)}
                   for i, n in sorted(ITEM_NAMES.items())],
+        "categories": [c for c in CATEGORY_ORDER
+                       if any(item_category(i) == c for i in ITEM_NAMES)],
     }
 
 
 def item_name(item_id):
     """Plain-English name for an item id ('' when unknown, 'Nothing' for 0)."""
     return ITEM_NAMES.get(item_id, "")
+
+
+# Item categories, read off the id layout of the extracted name table. Every block is
+# internally consistent -- the labels below are taken from what the names in each range
+# actually are, not guessed:
+#
+#   1000s  Healing Herb, Spirit Medicine, Magic Drop        -> battle consumables
+#   3000s  Poached Egg, Miso Soup, Cherry Pie               -> cooked dishes
+#   4000s-5000s  Runeshard of Fire 1, Magic Sword RS        -> runeshards
+#   6000-6699    helmets, armour, shields                   -> equipment
+#   6700-6899    badges, brooches, bangles, Mark of a Hero  -> accessories
+#   7000s  Rune of Fire, Rune of Herbal Alchemy             -> runes
+#   8000s  ... Recipe, ... Script                           -> recipes and scripts
+#   9000s  Unknown Coin, Porcelain Vase, Astrolabe          -> valuables
+#   10000s Rock Salt, Wine, Red Gemstone, Gold Bread        -> trade goods
+#   12000s Rubber Duckie, Capybara Army, Autumn Leaves      -> decorations
+#   20000s First Egg ... Champion Egg                       -> race eggs
+#   50000s Food, Lumber, Stone, Pelt                        -> town resources
+#   51000s Mystic Lumber, Iron Ore, Anc. Dragon's Tooth     -> materials
+#   52000s Vegetables, Egg, Meat, Salt, Spice               -> ingredients
+#   70000s Fruit of Knowledge, Essence of Crown             -> special items
+#   71000s Pieter, Marin, Extra Pack 3                      -> cards
+#   72000s Plantvine, Sahagin, Wind Beigoma                 -> beigoma
+#   98000s Scroll of Heaven, Carrie's Ring                  -> quest items
+#   99000s+ Bamboo Rod, Beigoma Box, Red Key, Golden Key    -> tools and keys
+ITEM_CATEGORIES = [
+    (1000, 2999, "Medicine"),
+    (3000, 3999, "Dishes"),
+    (4000, 5999, "Runeshards"),
+    (6000, 6699, "Equipment"),
+    (6700, 6999, "Accessories"),
+    (7000, 7999, "Runes"),
+    (8000, 8999, "Recipes & scripts"),
+    (9000, 9999, "Valuables"),
+    (10000, 11999, "Trade goods"),
+    (12000, 19999, "Decorations"),
+    (20000, 20999, "Race eggs"),
+    (50000, 50999, "Town resources"),
+    (51000, 51999, "Materials"),
+    (52000, 52999, "Ingredients"),
+    (70000, 70999, "Special items"),
+    (71000, 71999, "Cards"),
+    (72000, 72999, "Beigoma"),
+    (98000, 98999, "Quest items"),
+    (99000, 999999, "Tools & keys"),
+]
+
+CATEGORY_ORDER = [label for _, _, label in ITEM_CATEGORIES] + ["Other"]
+
+
+def item_category(item_id):
+    """Category label for an item id; 'Other' for anything outside the known blocks."""
+    for lo, hi, label in ITEM_CATEGORIES:
+        if lo <= item_id <= hi:
+            return label
+    return "Other"
 
 
 # Equipment slots are fixed: head, body, hands (shields), accessory. The game stores four.
@@ -377,6 +436,7 @@ def summarize(obj):
         if isinstance(it, dict):
             items.append({"index": i, "id": it.get("_id"),
                           "name": item_name(it.get("_id")),
+                          "category": item_category(it.get("_id") or 0),
                           "count": it.get("_count"), "max": it.get("_max")})
 
     town = obj.get("_fortressTown") or {}

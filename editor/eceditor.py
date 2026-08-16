@@ -179,6 +179,26 @@ tr.added td{background:rgba(158,196,107,.12)}
 .rosterbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:6px}
 .rosterbar input[type=search]{width:190px}
 
+/* inventory grouping */
+.catgroup{border:1px solid var(--line);border-radius:5px;margin-bottom:6px;
+  background:rgba(0,0,0,.16)}
+.catgroup > summary{cursor:pointer;padding:7px 12px;list-style:none;
+  display:flex;align-items:center;gap:10px;
+  font-family:Georgia,serif;letter-spacing:.08em;text-transform:uppercase;
+  font-size:12px;font-weight:700;color:var(--gold)}
+.catgroup > summary::-webkit-details-marker{display:none}
+.catgroup > summary::before{content:"▸";color:var(--gold-dim);font-size:10px;
+  transition:transform .12s}
+.catgroup[open] > summary::before{transform:rotate(90deg)}
+.catgroup > summary:hover{background:rgba(217,180,73,.08)}
+.catcount{margin-left:auto;color:var(--muted);font-size:11px;
+  font-family:"Segoe UI",sans-serif;letter-spacing:0;text-transform:none}
+.catgroup table{margin:0 0 6px}
+.catgroup td:first-child,.catgroup th:first-child{padding-left:14px}
+.invbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0 8px}
+.invbar input[type=search]{width:200px}
+.invbar select{width:auto;min-width:150px}
+
 /* Steam Cloud state */
 .cloud{display:inline-block;margin-top:3px;padding:1px 7px;border-radius:99px;
   font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
@@ -331,8 +351,13 @@ function buildDatalists(){
   let html = mk("dl_rune", cat.runes) + mk("dl_item", cat.items);
   for (const s of Object.keys(cat.equipBySlot))
     html += mk("dl_equip" + s, cat.equipBySlot[s]);
+  // ...and one per item category, so the add-item picker can be narrowed
+  for (const c of cat.categories)
+    html += mk("dl_cat_" + slug(c), cat.items.filter(o => o.category === c));
   host.innerHTML = html;
 }
+
+const slug = s => s.replace(/[^a-z0-9]+/gi, "_").toLowerCase();
 
 /* One id -> name map for every label, so a field still reads properly even if the item
    isn't in that slot's shortlist. */
@@ -588,8 +613,11 @@ function render(){
   // --- Inventory pane
   h += `</div><div class="subpane" id="sp-inv">`;
   h += `<h3 style="font-size:13px;color:var(--muted);margin:4px 0 6px">
-          INVENTORY (${s.items.length})</h3>
+          INVENTORY — ${s.items.length} stacks</h3>
     <div class="additem">
+      <div class="f"><label>Category</label>
+        <select id="add_cat"><option value="">All categories</option>` +
+        cat.categories.map(c => `<option>${c}</option>`).join("") + `</select></div>
       <div class="f"><label>Item</label>
         <input id="add_item" class="pick" list="dl_item" placeholder="type a name or id…"></div>
       <div class="f"><label>Quantity</label>
@@ -597,16 +625,42 @@ function render(){
       <button class="ghost" id="add_btn" type="button">Add to inventory</button>
       <span class="hint" id="add_note">Stacks larger than the item's max are split automatically.</span>
     </div>
-    <div class="tablewrap"><table id="invtable">
-      <tr><th>#</th><th>Item</th><th>Count</th><th>Max</th><th></th></tr>`;
+    <div class="invbar">
+      <input type="search" id="invfilter" placeholder="filter items…">
+      <button class="ghost" type="button" id="invexpand">Expand all</button>
+      <button class="ghost" type="button" id="invcollapse">Collapse all</button>
+      <span class="hint" id="invnote"></span>
+    </div>`;
+
+  // group the stacks by category -- a full save carries hundreds of them (220 Beigoma,
+  // 122 cards), which is unreadable as one flat list
+  const groups = new Map();
   for (const it of s.items){
-    h += `<tr data-row="${it.index}"><td>${it.index}</td>
-      <td>${it.name || "?"} <span class="itemname">(${it.id})</span></td>
-      <td><input class="narrow" type="number" data-i="${it.index}" data-k="_count" value="${it.count}"></td>
-      <td><input class="narrow" type="number" data-i="${it.index}" data-k="_max" value="${it.max}"></td>
-      <td><button class="rm" type="button" data-rm="${it.index}">remove</button></td></tr>`;
+    if (!groups.has(it.category)) groups.set(it.category, []);
+    groups.get(it.category).push(it);
   }
-  h += `</table></div><div id="pendingadds"></div></div>`;   // close table wrap + pane
+  const order = cat.categories.filter(c => groups.has(c))
+                  .concat([...groups.keys()].filter(c => !cat.categories.includes(c)));
+
+  for (const c of order){
+    const rows = groups.get(c);
+    const total = rows.reduce((n, it) => n + (it.count || 0), 0);
+    h += `<details class="catgroup" data-cat="${c}">
+      <summary>${c}<span class="catcount">${rows.length} stack${rows.length>1?"s":""}
+        · ${total} total</span></summary>
+      <div class="tablewrap"><table>
+        <tr><th>#</th><th>Item</th><th>Count</th><th>Max</th><th></th></tr>`;
+    for (const it of rows){
+      h += `<tr data-row="${it.index}" data-name="${(it.name||"").toLowerCase()} ${it.id}">
+        <td>${it.index}</td>
+        <td>${it.name || "?"} <span class="itemname">(${it.id})</span></td>
+        <td><input class="narrow" type="number" data-i="${it.index}" data-k="_count" value="${it.count}"></td>
+        <td><input class="narrow" type="number" data-i="${it.index}" data-k="_max" value="${it.max}"></td>
+        <td><button class="rm" type="button" data-rm="${it.index}">remove</button></td></tr>`;
+    }
+    h += `</table></div></details>`;
+  }
+  h += `<div id="pendingadds"></div></div>`;
 
   h += `<div class="bar"><button id="write">Write save</button>
         <button class="ghost" id="revertall">Revert all</button>
@@ -698,6 +752,48 @@ function wireInventory(){
     }
     countDirty();
   });
+
+  // category picker narrows which items the add field offers
+  const catSel = document.getElementById("add_cat");
+  const addField = document.getElementById("add_item");
+  if (catSel && addField){
+    catSel.onchange = () => {
+      addField.setAttribute("list",
+        catSel.value ? "dl_cat_" + slug(catSel.value) : "dl_item");
+      addField.value = "";
+      addField.placeholder = catSel.value
+        ? `type a ${catSel.value.toLowerCase()} name or id…` : "type a name or id…";
+      addField.focus();
+    };
+  }
+
+  // filter + expand/collapse across the grouped stacks
+  const groups = [...document.querySelectorAll(".catgroup")];
+  const filt = document.getElementById("invfilter");
+  if (filt){
+    filt.addEventListener("input", () => {
+      const q = filt.value.toLowerCase().trim();
+      let shown = 0;
+      for (const g of groups){
+        let any = false;
+        g.querySelectorAll("tr[data-row]").forEach(tr => {
+          const hit = !q || (tr.dataset.name || "").includes(q);
+          tr.style.display = hit ? "" : "none";
+          if (hit) any = true;
+        });
+        g.style.display = any ? "" : "none";
+        if (any && q) g.open = true;          // reveal matches as you type
+        shown += any ? 1 : 0;
+      }
+      document.getElementById("invnote").textContent =
+        q ? `${shown} categor${shown === 1 ? "y" : "ies"} match` : "";
+    });
+  }
+  const setAll = open => groups.forEach(g => { g.open = open; });
+  const ex = document.getElementById("invexpand");
+  const co = document.getElementById("invcollapse");
+  if (ex) ex.onclick = () => setAll(true);
+  if (co) co.onclick = () => setAll(false);
 
   const btn = document.getElementById("add_btn");
   if (!btn) return;
