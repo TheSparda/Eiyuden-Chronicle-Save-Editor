@@ -17,6 +17,15 @@ namespace EiyudenKeyDump
     {
         internal static ManualLogSource Log;
 
+        // Master switch. Everything this plugin does (all Harmony patches, the crypto
+        // capture, the name/rune-hole/role dumps) has already served its purpose -- the
+        // key, name tables, and role table are extracted and baked into the save editor.
+        // Left at false so the plugin loads (BepInEx will log it) but does nothing: no
+        // hooks installed, no reflection scans, no dump-folder writes, on every single
+        // save load. Flip back to true if any of that data needs re-capturing (e.g. a
+        // game update, or extending the role/stat tables further).
+        private const bool Enabled = false;
+
         // Where the captured key / names / sample payloads land. Override with
         // EIYUDEN_DUMP_DIR; otherwise a "dump" folder beside the game executable.
         internal static string DumpDir =
@@ -38,6 +47,13 @@ namespace EiyudenKeyDump
 
         private void LoadInner()
         {
+            if (!Enabled)
+            {
+                Log.LogInfo("=== Eiyuden key dumper: disabled (Plugin.Enabled = false), "
+                    + "no hooks installed ===");
+                return;
+            }
+
             Directory.CreateDirectory(DumpDir);
             Log.LogInfo("=== Eiyuden key dumper loading ===");
             Log.LogInfo("dump dir: " + DumpDir);
