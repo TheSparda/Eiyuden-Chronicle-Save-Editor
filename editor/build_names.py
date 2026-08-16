@@ -7,7 +7,8 @@ instead of raw ids, so we pull it out once into ec_item_names.json.
 import json, os, re, collections
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CT = os.path.join(HERE, "reference", "EiyudenChronicle.CT")
+ROOT = os.path.dirname(HERE)                # reference/ sits beside editor/
+CT = os.path.join(ROOT, "reference", "EiyudenChronicle.CT")
 OUT = os.path.join(HERE, "ec_item_names.json")
 
 raw = open(CT, encoding="utf-8", errors="replace").read()

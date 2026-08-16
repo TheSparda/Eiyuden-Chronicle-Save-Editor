@@ -14,7 +14,7 @@ install, nothing uploaded), in the same spirit as the
 Requires **Python 3.8+** and a modern browser.
 
 - **Windows:** double-click `Start Editor (Windows).bat`
-- **Terminal:** `py eceditor.py`
+- **Terminal:** `cd editor` then `py eceditor.py`
 
 Then open the printed `http://127.0.0.1:8751`.
 
@@ -22,7 +22,7 @@ Then open the printed `http://127.0.0.1:8751`.
 > overwrite your edits when it next saves or exits.
 
 > **Steam Cloud can also undo your edits** — see [Steam Cloud](#steam-cloud) below, and
-> run `py cloudcheck.py` to see where each save stands.
+> run `py editor/cloudcheck.py` to see where each save stands.
 
 ## How to use
 
@@ -78,42 +78,26 @@ See "Difficulty" below.
 `UserDataN.dat` are save slots, `UserDataInfo.dat` is the slot index the title screen
 reads, `SystemData.dat` holds settings. All use the same encryption.
 
-**Encryption — solved.** The whole file is **TripleDES-CBC with PKCS7 padding** over
-UTF-8 JSON. There is no header, no magic bytes and no checksum: byte 0 is ciphertext, and
-the only integrity requirement is that the file decrypts to valid JSON.
+**Save format.** Each file is an encrypted blob wrapping UTF-8 JSON. The editor handles
+the encryption transparently — decrypting on open, re-encrypting on write — so everything
+below is expressed in terms of the decoded JSON.
 
-- key (24 bytes): `b3ba76ead29507bad9e68bab87b6e920fe5193bdce92a870`
-- IV (8 bytes): `2f6e9693c9779505`
+There is no checksum to repair: the only integrity requirement is that a file decrypts to
+valid JSON. `write_save` therefore verifies its own output by decrypting what it just
+produced and comparing it against the data it meant to save, before anything on disk is
+replaced.
 
-The key and IV were recovered at **runtime** from `Rising.CryptoHelper` — the game is
-IL2CPP, so the values are compiled into native code in `GameAssembly.dll` and are not
-present in any decompilable C#. A BepInEx/Harmony plugin (`plugin/`) hooks
-`CryptoHelper.Encryption(data, key, iv)` and dumps the arguments plus the plaintext and
-ciphertext of every call.
+**Verification.** Encryption and decryption were confirmed against captured
+plaintext/ciphertext pairs, in both directions, and real save files round-trip
+byte-for-byte — the editor emits exactly what the game itself would have written. The
+self-tests re-check this.
 
-An offline attack was tried first and **failed**: ~50,000 key-length string literals were
-harvested from `global-metadata.dat` and tested against a real save, with no hit. The key
-is not a string literal.
-
-**Verification.** The scheme was confirmed in both directions against seven
-plaintext/ciphertext pairs captured from the running game:
-
-- decrypting the game's ciphertext reproduces its plaintext exactly, and
-- re-encrypting that plaintext reproduces the game's ciphertext **byte-for-byte**.
-
-Real save files on disk also round-trip byte-for-byte. That bidirectional match is what
-makes writing safe — the editor emits exactly what the game would have emitted.
-
-**A note on the name.** The metadata contains `CreateAesCryptoServiceProvider`, which is a
-red herring from an unrelated class. The save path is TripleDES: the 24-byte key and
-**8-byte** IV give it away, since AES requires a 16-byte IV.
-
-**Speed.** Decryption goes through the OS: Windows ships 3DES in `bcrypt.dll` and `ctypes`
-is stdlib, so the native path costs nothing in dependencies and turns a 269 KB save from
-~4.2 s into ~8 ms. `pydes.py` remains the reference implementation and the fallback on
-other platforms, and the self-tests assert the two agree byte-for-byte — a save written by
-one must be readable by the other, and by the game. Decrypted saves are also cached in
-memory for the session, so reopening a slot is instant.
+**Speed.** Decryption goes through the OS where possible (`ctypes` is stdlib, so this
+costs nothing in dependencies), taking a 269 KB save from ~4.2 s to ~8 ms. `pydes.py`
+remains the portable reference implementation and the fallback on other platforms, and the
+self-tests assert the two agree byte-for-byte — a save written by one must be readable by
+the other, and by the game. Decrypted saves are cached in memory for the session, so
+reopening a slot is instant.
 
 ### Difficulty
 
@@ -150,12 +134,12 @@ or quitting the game. The reliable workflow is:
 
 1. **Quit the game** (and ideally Steam) before editing.
 2. Edit and write.
-3. Run `py cloudcheck.py` — every file you touched should read **LOCAL NEWER**.
+3. Run `py editor/cloudcheck.py` — every file you touched should read **LOCAL NEWER**.
 4. Start the game through Steam. Steam sees the newer local files and uploads them.
 5. If a **Steam Cloud Conflict** dialog appears, choose the **local / "Upload to Steam
    Cloud"** option — picking the cloud copy discards your edits.
 
-`cloudcheck.py` reports each tracked file as `in sync`, `LOCAL NEWER` (pending upload),
+`cloudcheck.py` (also built into the editor's sidebar) reports each tracked file as `in sync`, `LOCAL NEWER` (pending upload),
 `CLOUD NEWER` (**at risk of being overwritten**), or `MISSING locally`, and exits non-zero
 when anything is at risk.
 
@@ -193,12 +177,6 @@ Nothing is ever truly locked out: the fields accept a raw id, so an unlisted ite
 still be entered deliberately. The filtering removes obviously-wrong categories without
 being able to block a legitimate edit.
 
-> The fully authoritative source would be `MasterData.EquipmentTable`'s `EquipPart`
-> field, but reaching it needs a live `MasterBundle` instance, which no static accessor
-> exposes — so it would require another runtime hook. The evidence-based mapping above
-> agrees with every observation and errs toward permissive, so that was not worth a
-> second dump.
-
 ### Name tables
 
 - **Items** (`ec_item_names.json`, 1142 entries) — extracted by `build_names.py` from the
@@ -206,26 +184,32 @@ being able to block a legitimate edit.
   saves tested.
 - **Stack maxima** (`ec_item_maxes.json`) — harvested by `build_names.py` from the
   player's own saves, so a newly added stack matches what the game would write.
-- **Character names** (`ec_unit_names.json`) — dumped by the BepInEx plugin from the
-  game's own `GetCharacterName(int)`, triggered off the save hook so it runs on the main
-  thread with master data and localization loaded. Optional: without it the editor falls
-  back to `#<id>`.
+- **Character names** (`ec_unit_names.json`, 121 entries) — sourced from the game's own
+  name lookup. Optional: without it the editor falls back to `#<id>`.
 
 ---
 
 ## Layout
 
 ```
+Start Editor (Windows).bat   <- the only thing at the top level
+README.md
+editor/
+```
+
+Everything else lives in `editor/`:
+
+```
 ecsave.py                  save reader/writer + edit model  (also a CLI)
 eceditor.py                web server + embedded UI
-pydes.py                   pure-Python DES/TripleDES, CBC + PKCS7
-winbcrypt.py               optional native 3DES via Windows CNG (ctypes)
+pydes.py                   portable pure-Python cipher implementation
+winbcrypt.py               optional native cipher via Windows CNG (ctypes)
 cloudcheck.py              Steam Cloud sync status (module + CLI; the editor uses it)
 build_names.py             builds the item-name, stack-max and equip-slot tables
 analyze_equip.py           working notes: how the equipment slot ranges were derived
 testutil.py                locates saves for the tests (no hardcoded paths)
 test_*.py, verify_py.py    self-tests (see below)
-plugin/                    BepInEx key/name dumper (C#) used for the recovery
+plugin/                    companion mod used to extract the name tables
 ec_item_names.json         1142 item ids -> names
 ec_item_maxes.json         observed per-item stack maxima
 ec_equip_slots.json        observed item -> equipment slot
@@ -243,6 +227,7 @@ is what makes a 275 KB story save load in a few seconds instead of ~30.
 ### CLI
 
 ```bash
+cd editor
 py ecsave.py list                       # find saves, with level/playtime
 py ecsave.py show UserData10.dat        # summary
 py ecsave.py dump UserData10.dat out.json
@@ -254,7 +239,8 @@ py ecsave.py pack out.json UserData10.dat
 ## Self-tests
 
 ```bash
-py pydes.py        # FIPS DES vectors + 3DES + CBC round-trip
+cd editor
+py pydes.py        # cipher self-tests against published vectors
 py verify_py.py    # against real captured game data
 py test_write.py   # full edit -> encrypt -> disk -> decrypt cycle
 ```
@@ -277,6 +263,4 @@ py test_write.py   # full edit -> encrypt -> disk -> decrypt cycle
 
 Architecture and the "never write unverified data" approach follow
 [TheSparda/Suikoden-4-Save-Editor](https://github.com/TheSparda/Suikoden-4-Save-Editor).
-Key recovery used [BepInEx](https://github.com/BepInEx/BepInEx) and
-[HarmonyX](https://github.com/BepInEx/HarmonyX). Save files and game assets are **not**
-included in this repository.
+Save files and game assets are **not** included in this repository.

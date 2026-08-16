@@ -93,9 +93,10 @@ DEFAULT_STACK_MAX = 99
 
 # Unit id -> character name, dumped from the game's own GetCharacterName(int) by the
 # BepInEx plugin (see plugin/Plugin.cs). Optional: without it the editor shows raw ids.
+_HERE = os.path.dirname(os.path.abspath(__file__))
 _UNIT_NAMES_PATHS = [
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "ec_unit_names.json"),
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "dump", "ec_unit_names.json"),
+    os.path.join(_HERE, "ec_unit_names.json"),
+    os.path.join(os.path.dirname(_HERE), "dump", "ec_unit_names.json"),   # plugin output
 ]
 
 

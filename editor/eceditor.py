@@ -180,6 +180,15 @@ tr.added td{background:rgba(158,196,107,.12)}
 .banner.info{color:var(--gold-hi);border-color:var(--gold-dim);
   background:rgba(217,180,73,.10)}
 .banner b{font-family:Georgia,serif;letter-spacing:.05em}
+.cloudhead{display:flex;align-items:center;gap:8px}
+.refresh{width:22px;height:22px;padding:0;line-height:1;border-radius:50%;
+  background:rgba(217,180,73,.12);color:var(--gold-hi);border:1px solid var(--gold-dim);
+  box-shadow:none;font-size:12px;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center}
+.refresh:hover{background:var(--gold);color:#2a1b04}
+.refresh:disabled{opacity:.5;cursor:default}
+.refresh.spinning{animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 label{display:block;color:var(--muted);font-size:12px;margin-bottom:3px;
   letter-spacing:.03em}
 input,select{background:rgba(11,7,3,.62);color:var(--fg);
@@ -360,22 +369,55 @@ async function loadSlots(){
   renderCloudSummary();
 }
 
-function renderCloudSummary(){
+function renderCloudSummary(note){
   const host = document.getElementById("cloudsummary");
   if (!host) return;
+
+  const head = `<div class="cloudhead"><b>Steam Cloud</b>
+      <button class="refresh" id="cloudrefresh" type="button"
+              title="Re-check Steam Cloud now">⟳</button></div>`;
+
+  let body;
   if (!cloud || !cloud.available){
-    host.innerHTML = `<b>Steam Cloud:</b> ${cloud ? cloud.reason : "unknown"}`;
-    return;
+    body = `<span class="sub">${cloud ? cloud.reason : "unknown"}</span>`;
+  } else {
+    const c = cloud.counts || {};
+    const bits = [];
+    if (c["cloud-newer"]) bits.push(
+      `<span class="cloud cloud-newer">${c["cloud-newer"]} at risk</span>`);
+    if (c["local-newer"]) bits.push(
+      `<span class="cloud local-newer">${c["local-newer"]} to upload</span>`);
+    if (c["missing"]) bits.push(`<span class="cloud missing">${c["missing"]} missing</span>`);
+    if (!bits.length) bits.push(`<span class="cloud synced">all in sync</span>`);
+    body = bits.join(" ");
   }
-  const c = cloud.counts || {};
-  const bits = [];
-  if (c["cloud-newer"]) bits.push(
-    `<span class="cloud cloud-newer">${c["cloud-newer"]} at risk</span>`);
-  if (c["local-newer"]) bits.push(
-    `<span class="cloud local-newer">${c["local-newer"]} to upload</span>`);
-  if (c["missing"]) bits.push(`<span class="cloud missing">${c["missing"]} missing</span>`);
-  if (!bits.length) bits.push(`<span class="cloud synced">all in sync</span>`);
-  host.innerHTML = `<b>Steam Cloud</b><br>${bits.join(" ")}`;
+  host.innerHTML = head + body +
+    (note ? `<div class="hint" style="margin-top:5px">${note}</div>` : "");
+  const btn = document.getElementById("cloudrefresh");
+  if (btn) btn.onclick = refreshCloud;
+}
+
+/* Steam rewrites its manifest when the game starts or exits, so the state can change
+   while the editor is open. Re-read it on demand and repaint anything that shows it. */
+async function refreshCloud(){
+  const btn = document.getElementById("cloudrefresh");
+  if (btn){ btn.disabled = true; btn.classList.add("spinning"); }
+  const before = JSON.stringify(cloud && cloud.files || {});
+  try{
+    const fresh = await api("/api/cloud");
+    const changed = JSON.stringify(fresh.files || {}) !== before;
+    cloud = fresh;
+    await loadSlots();                       // badges
+    refreshBanner();   // swap the banner in place -- a full render() would discard
+                       // whatever the user is part-way through editing
+    renderCloudSummary(changed ? "updated — cloud state changed"
+                               : "checked — no change");
+  } catch(e){
+    renderCloudSummary(`check failed: ${e.message}`);
+  } finally {
+    const b = document.getElementById("cloudrefresh");
+    if (b){ b.disabled = false; b.classList.remove("spinning"); }
+  }
 }
 
 async function open(path, node){
@@ -414,6 +456,16 @@ function cloudBanner(){
       Start the game through Steam to upload it; if a Cloud Conflict dialog appears,
       pick the local / “Upload to Steam Cloud” option.</div>`;
   return "";
+}
+
+/* Replace just the cloud banner, leaving every edited field untouched. */
+function refreshBanner(){
+  const ed = document.getElementById("editor");
+  if (!ed || !cur || !data) return;
+  const existing = ed.querySelector(":scope > .banner");
+  if (existing) existing.remove();
+  const html = cloudBanner();
+  if (html) ed.insertAdjacentHTML("afterbegin", html);
 }
 
 function render(){

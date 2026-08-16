@@ -13,9 +13,9 @@ reference/
 *.dat.bak
 *.bak
 
-# Build output
-plugin/bin/
-plugin/obj/
+# Build output (paths are anywhere in the tree, so they survive moves)
+bin/
+obj/
 __pycache__/
 *.pyc
 

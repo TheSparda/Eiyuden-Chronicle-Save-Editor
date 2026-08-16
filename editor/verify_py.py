@@ -6,7 +6,8 @@ import testutil
 KEY = bytes.fromhex("b3ba76ead29507bad9e68bab87b6e920fe5193bdce92a870")
 IV = bytes.fromhex("2f6e9693c9779505")
 
-DUMP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dump")
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DUMP = os.path.join(_ROOT, "dump")          # sits beside editor/, not in it
 SAVE = testutil.pick_save(max_size=60000)      # a small save keeps this quick
 
 print("=== known-answer test vs captured game data ===")
