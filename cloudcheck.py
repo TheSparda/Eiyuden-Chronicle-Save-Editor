@@ -82,72 +82,107 @@ def sha1(path):
     return h.hexdigest()
 
 
-def main():
+# --- status model, shared by the CLI and the editor UI ---------------------------
+STATE_SYNCED = "synced"        # local matches what Steam last synced
+STATE_LOCAL = "local-newer"    # edited since the last sync; Steam should upload it
+STATE_CLOUD = "cloud-newer"    # cloud copy is ahead -- launching may overwrite local
+STATE_MISSING = "missing"      # tracked by Steam but not on disk
+
+STATE_LABEL = {
+    STATE_SYNCED: "in sync",
+    STATE_LOCAL: "LOCAL NEWER",
+    STATE_CLOUD: "CLOUD NEWER",
+    STATE_MISSING: "MISSING locally",
+}
+
+STATE_NOTE = {
+    STATE_SYNCED: "",
+    STATE_LOCAL: "Steam should upload this on next game launch",
+    STATE_CLOUD: "launching may OVERWRITE your local edit",
+    STATE_MISSING: "cloud copy would be downloaded",
+}
+
+
+def status(save_dir=None):
+    """Cloud state for every save Steam tracks.
+
+    Returns {"available": bool, "reason": str, "files": {basename: {...}}, "counts": {...}}.
+    `available` is False when no manifest exists -- meaning Steam Cloud is off for the
+    game (or it was never launched here), in which case local saves are authoritative.
+    """
     caches = find_remotecaches()
     if not caches:
-        print("No Steam cloud manifest found for Eiyuden Chronicle (app 1658280).")
-        print("Either the game was never launched on this machine, or Steam Cloud is off")
-        print("for it -- in which case your local saves are already authoritative.")
-        return 0
+        return {"available": False,
+                "reason": "no Steam Cloud manifest for this game -- "
+                          "cloud saves appear to be off, so local files win",
+                "files": {}, "counts": {}}
 
-    save_dirs = ecsave.find_save_dirs()
-    if not save_dirs:
-        print("No save folder found.")
-        return 1
-    save_dir = save_dirs[0]
-    # manifest paths are relative to %LOCALAPPDATA%Low (Steam "root 12" = WinAppDataLocalLow)
+    if save_dir is None:
+        dirs = ecsave.find_save_dirs()
+        if not dirs:
+            return {"available": False, "reason": "no save folder found",
+                    "files": {}, "counts": {}}
+        save_dir = dirs[0]
+
+    # Manifest paths are relative to %LOCALAPPDATA%Low (Steam "root 12").
     lowdir = os.path.abspath(os.path.join(save_dir, "..", "..", "..", ".."))
 
-    rc = 0
+    files, counts = {}, {STATE_SYNCED: 0, STATE_LOCAL: 0, STATE_CLOUD: 0, STATE_MISSING: 0}
+    account_ids = []
     for account, path in caches:
-        print(f"Steam account {account}")
-        print(f"  manifest: {path}\n")
+        account_ids.append(account)
         data = parse_vdf(open(path, encoding="utf-8", errors="replace").read())
-        app = data.get(APP_ID, {})
-
-        rows, pending, risky, missing = [], 0, 0, 0
-        for name, meta in app.items():
+        for name, meta in (data.get(APP_ID) or {}).items():
             if not isinstance(meta, dict):
                 continue
             local = os.path.join(lowdir, name.replace("/", os.sep))
             short = os.path.basename(name)
+
             if not os.path.exists(local):
-                rows.append((short, "MISSING locally", "cloud copy would be downloaded"))
-                missing += 1
-                continue
-
-            same_size = str(os.path.getsize(local)) == meta.get("size")
-            same_hash = sha1(local).lower() == (meta.get("sha") or "").lower()
-            mtime = int(os.path.getmtime(local))
-            remote_t = int(meta.get("remotetime", 0) or 0)
-
-            if same_hash and same_size:
-                rows.append((short, "in sync", ""))
-            elif mtime > remote_t:
-                rows.append((short, "LOCAL NEWER",
-                             "Steam should upload this on next game launch"))
-                pending += 1
+                state = STATE_MISSING
             else:
-                rows.append((short, "CLOUD NEWER",
-                             "launching may OVERWRITE your local edit"))
-                risky += 1
+                same = (str(os.path.getsize(local)) == meta.get("size")
+                        and sha1(local).lower() == (meta.get("sha") or "").lower())
+                if same:
+                    state = STATE_SYNCED
+                elif int(os.path.getmtime(local)) > int(meta.get("remotetime", 0) or 0):
+                    state = STATE_LOCAL
+                else:
+                    state = STATE_CLOUD
 
-        width = max(len(r[0]) for r in rows) if rows else 10
-        for name, state, note in sorted(rows):
-            print(f"  {name:<{width}}  {state:<16} {note}")
+            files[short] = {"state": state, "label": STATE_LABEL[state],
+                            "note": STATE_NOTE[state], "path": local}
+            counts[state] += 1
 
-        print()
-        print(f"  {len(rows)} tracked files: {pending} pending upload, "
-              f"{risky} at risk, {missing} missing locally")
-        if risky:
-            print("\n  WARNING: at least one local save is older than the cloud copy.")
-            print("  Launching the game may replace it. See the guidance in the README.")
-            rc = 2
-        elif pending:
-            print("\n  Your edits are newer than the cloud. Start the game through Steam")
-            print("  and Steam should upload them; if a Cloud Conflict dialog appears,")
-            print("  choose the LOCAL / 'Upload to Steam Cloud' option.")
-    return rc
+    return {"available": True, "reason": "", "files": files, "counts": counts,
+            "accounts": account_ids}
+
+
+def main():
+    st = status()
+    if not st["available"]:
+        print(st["reason"])
+        return 0
+
+    rows = sorted((name, m["label"], m["note"]) for name, m in st["files"].items())
+    width = max((len(r[0]) for r in rows), default=10)
+    print(f"Steam account(s): {', '.join(st.get('accounts', []))}\n")
+    for name, label, note in rows:
+        print(f"  {name:<{width}}  {label:<16} {note}")
+
+    c = st["counts"]
+    print(f"\n  {len(rows)} tracked files: {c[STATE_LOCAL]} pending upload, "
+          f"{c[STATE_CLOUD]} at risk, {c[STATE_MISSING]} missing locally")
+
+    if c[STATE_CLOUD]:
+        print("\n  WARNING: at least one local save is older than the cloud copy.")
+        print("  Launching the game may replace it. See the guidance in the README.")
+        return 2
+    if c[STATE_LOCAL]:
+        print("\n  Your edits are newer than the cloud. Start the game through Steam")
+        print("  and Steam should upload them; if a Cloud Conflict dialog appears,")
+        print("  choose the LOCAL / 'Upload to Steam Cloud' option.")
+    return 0
 
 
 if __name__ == "__main__":

@@ -66,3 +66,26 @@ for save_dir in ecsave.find_save_dirs():
 maxes = {str(i): c.most_common(1)[0][0] for i, c in sorted(seen.items())}
 json.dump(maxes, open(MAX_OUT, "w", encoding="utf-8"), indent=0)
 print(f"wrote {MAX_OUT} ({len(maxes)} stack maxima observed across {scanned} saves)")
+
+# --- observed equipment slot per item -------------------------------------------
+# Which of the four slots the game itself has put each piece of gear in. The id layout
+# is mostly clean (see ecsave.EQUIP_SLOT_RANGES), but 6200-6299 interleaves head and
+# body gear irregularly, so observation is the only reliable source there.
+SLOT_OUT = os.path.join(HERE, "ec_equip_slots.json")
+slot_seen = collections.defaultdict(collections.Counter)
+for save_dir in ecsave.find_save_dirs():
+    for s in ecsave.list_saves(save_dir):
+        try:
+            obj = ecsave.load_json(s["path"])
+        except Exception:
+            continue
+        for u in (obj.get("_unitData") or {}).get("_units") or []:
+            for slot, item in enumerate(u.get("_equipment") or []):
+                if item:
+                    slot_seen[item][slot] += 1
+
+conflicts = [i for i, c in slot_seen.items() if len(c) > 1]
+slots = {str(i): c.most_common(1)[0][0] for i, c in sorted(slot_seen.items())}
+json.dump(slots, open(SLOT_OUT, "w", encoding="utf-8"), indent=0)
+print(f"wrote {SLOT_OUT} ({len(slots)} items seen equipped; "
+      f"{len(conflicts)} appeared in more than one slot)")

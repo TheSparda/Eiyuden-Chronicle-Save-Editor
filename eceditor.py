@@ -9,6 +9,7 @@ decrypt back to exactly the data it intended to save.
 """
 import http.server, socketserver, json, os, urllib.parse, threading, webbrowser, time
 
+import cloudcheck
 import ecsave
 
 PORT = 8751
@@ -163,6 +164,22 @@ tr.removed td{opacity:.4;text-decoration:line-through}
 tr.added td{background:rgba(158,196,107,.12)}
 .hint{color:var(--muted);font-size:11px;margin-top:2px;font-style:italic}
 .chk{color:var(--fg)}
+
+/* Steam Cloud state */
+.cloud{display:inline-block;margin-top:3px;padding:1px 7px;border-radius:99px;
+  font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  border:1px solid}
+.cloud.synced{color:#9ec46b;border-color:#5c7a3c;background:rgba(158,196,107,.10)}
+.cloud.local-newer{color:var(--gold-hi);border-color:var(--gold-dim);
+  background:rgba(217,180,73,.14)}
+.cloud.cloud-newer{color:#e79080;border-color:#8d3d2f;background:rgba(200,80,63,.16)}
+.cloud.missing{color:var(--muted);border-color:var(--line)}
+.banner{padding:9px 12px;border-radius:5px;margin-bottom:12px;font-size:12px;
+  border:1px solid}
+.banner.risk{color:#e79080;border-color:#8d3d2f;background:rgba(200,80,63,.14)}
+.banner.info{color:var(--gold-hi);border-color:var(--gold-dim);
+  background:rgba(217,180,73,.10)}
+.banner b{font-family:Georgia,serif;letter-spacing:.05em}
 label{display:block;color:var(--muted);font-size:12px;margin-bottom:3px;
   letter-spacing:.03em}
 input,select{background:rgba(11,7,3,.62);color:var(--fg);
@@ -234,6 +251,7 @@ textarea:focus{outline:none;border-color:var(--gold)}
         Close the game before writing — it caches saves in memory and will overwrite
         your changes on exit.<br><br>
         A <code>.bak</code> is made before the first write to any file.
+        <div id="cloudsummary" style="margin-top:10px"></div>
       </div>
     </div>
   </div>
@@ -260,8 +278,14 @@ textarea:focus{outline:none;border-color:var(--gold)}
 </div>
 
 <script>
-let cur = null, data = null, cat = null;
+let cur = null, data = null, cat = null, cloud = null;
 let pendingRemove = new Set(), pendingAdd = [];
+
+const cloudOf = path => {
+  if (!cloud || !cloud.available) return null;
+  const base = path.split(/[\\/]/).pop();
+  return cloud.files[base] || null;
+};
 
 /* Shared datalists keep the DOM small: one <option> set for hundreds of inputs,
    instead of a full <select> per slot across 120 units. */
@@ -276,14 +300,24 @@ function buildDatalists(){
     host.id = "datalists";
     document.body.appendChild(host);
   }
-  host.innerHTML = mk("dl_equip", cat.equipment) + mk("dl_rune", cat.runes) +
-                   mk("dl_item", cat.items);
+  // One list per equipment slot, so the Head field offers only head gear, etc.
+  let html = mk("dl_rune", cat.runes) + mk("dl_item", cat.items);
+  for (const s of Object.keys(cat.equipBySlot))
+    html += mk("dl_equip" + s, cat.equipBySlot[s]);
+  host.innerHTML = html;
 }
 
-const labelFor = (id, names) => {
-  const hit = names.find(o => o.id === id);
-  return hit ? `${id} — ${hit.name}` : String(id);
-};
+/* One id -> name map for every label, so a field still reads properly even if the item
+   isn't in that slot's shortlist. */
+let nameById = new Map();
+function buildNameMap(){
+  nameById = new Map();
+  for (const o of cat.items) nameById.set(o.id, o.name);
+  for (const o of cat.runes) if (!nameById.has(o.id)) nameById.set(o.id, o.name);
+  for (const o of cat.equipment) if (!nameById.has(o.id)) nameById.set(o.id, o.name);
+}
+const labelFor = id =>
+  nameById.has(id) ? `${id} — ${nameById.get(id)}` : String(id);
 /* "6011 — Dragonscale Helmet" -> 6011; a bare number works too. */
 const idFromLabel = s => {
   const m = String(s).trim().match(/^(\d+)/);
@@ -304,6 +338,7 @@ function fmtTime(s){
 
 async function loadSlots(){
   const j = await api("/api/saves");
+  cloud = j.cloud || null;
   const el = document.getElementById("slots");
   if (!j.dirs.length){ el.innerHTML = '<div class="body err">No saves found.</div>'; return; }
   let h = "";
@@ -311,13 +346,36 @@ async function loadSlots(){
     for (const s of d.saves){
       const meta = [s.level!=null?("Lv"+s.level):"", s.playtime!=null?fmtTime(s.playtime):"",
                     (s.size/1024).toFixed(0)+" KB"].filter(Boolean).join(" · ");
+      const c = cloudOf(s.path);
+      // "in sync" is the boring default -- only badge the states worth acting on
+      const badge = (c && c.state !== "synced")
+        ? `<div><span class="cloud ${c.state}" title="${c.note}">${c.label}</span></div>` : "";
       h += `<div class="slot" data-p="${encodeURIComponent(s.path)}">
               <div class="n">${s.name}</div><div class="m">${meta}</div>
-              <div class="m when">${s.saved || ""}</div></div>`;
+              <div class="m when">${s.saved || ""}</div>${badge}</div>`;
     }
   el.innerHTML = h;
   el.querySelectorAll(".slot").forEach(n =>
     n.onclick = () => open(decodeURIComponent(n.dataset.p), n));
+  renderCloudSummary();
+}
+
+function renderCloudSummary(){
+  const host = document.getElementById("cloudsummary");
+  if (!host) return;
+  if (!cloud || !cloud.available){
+    host.innerHTML = `<b>Steam Cloud:</b> ${cloud ? cloud.reason : "unknown"}`;
+    return;
+  }
+  const c = cloud.counts || {};
+  const bits = [];
+  if (c["cloud-newer"]) bits.push(
+    `<span class="cloud cloud-newer">${c["cloud-newer"]} at risk</span>`);
+  if (c["local-newer"]) bits.push(
+    `<span class="cloud local-newer">${c["local-newer"]} to upload</span>`);
+  if (c["missing"]) bits.push(`<span class="cloud missing">${c["missing"]} missing</span>`);
+  if (!bits.length) bits.push(`<span class="cloud synced">all in sync</span>`);
+  host.innerHTML = `<b>Steam Cloud</b><br>${bits.join(" ")}`;
 }
 
 async function open(path, node){
@@ -343,9 +401,24 @@ function num(id, label, val, step){
     <input id="${id}" type="number" value="${val ?? ""}" ${step?`step="${step}"`:""}></div>`;
 }
 
+function cloudBanner(){
+  const c = cloudOf(cur);
+  if (!c) return "";
+  if (c.state === "cloud-newer")
+    return `<div class="banner risk"><b>Steam Cloud is ahead of this file.</b>
+      Launching the game may overwrite it — and any edit you make here.
+      Consider disabling cloud saves for the game, or launching once to settle the
+      conflict (choose the local copy) before editing.</div>`;
+  if (c.state === "local-newer")
+    return `<div class="banner info"><b>Edited since Steam last synced.</b>
+      Start the game through Steam to upload it; if a Cloud Conflict dialog appears,
+      pick the local / “Upload to Steam Cloud” option.</div>`;
+  return "";
+}
+
 function render(){
   const s = data.summary;
-  let h = `<div class="grid">
+  let h = cloudBanner() + `<div class="grid">
     ${num("f_money","Money",s.money)}
     ${num("f_seconds","Playtime (seconds)",s.seconds,"0.001")}
     ${num("f_town","Fortress town level",s.fortressTownLevel)}
@@ -387,14 +460,15 @@ function render(){
     for (const u of s.units){
       const equip = `<div class="slotgrid">` + u.equipment.map((e,i) =>
         `<div class="slotcell"><span class="lab">${SLOTS[i]||("s"+i)}</span>
-           <input class="pick" list="dl_equip" data-u="${u.index}" data-eq="${i}"
-                  value="${labelFor(e, cat.equipment)}"></div>`).join("") + `</div>`;
+           <input class="pick" list="dl_equip${i}" data-u="${u.index}" data-eq="${i}"
+                  value="${labelFor(e)}"></div>`)
+        .join("") + `</div>`;
 
       const runes = `<div class="slotgrid runes">` + u.runeHoles.map((r,i) =>
         u.runeReleased[i]
           ? `<div class="slotcell"><input class="pick" list="dl_rune"
                data-u="${u.index}" data-rune="${i}"
-               value="${labelFor(r, cat.runes)}"></div>`
+               value="${labelFor(r)}"></div>`
           : `<div class="slotcell locked">slot ${i+1} locked</div>`
       ).join("") + `</div>`;
 
@@ -530,6 +604,32 @@ function decorate(){
     };
     el.addEventListener("input", () => refresh(el, btn));
     el.addEventListener("change", () => refresh(el, btn));
+
+    /* A datalist filters its options by what's already in the box, so a field
+       pre-filled with "6011 — Dragonscale Helmet" matches only itself and the
+       dropdown looks broken. Empty the box on the way in (before the click opens
+       the popup, hence mousedown) so the full list shows, and put the old value
+       back if nothing was chosen. */
+    if (el.classList.contains("pick")){
+      const ph0 = el.placeholder || "";          // e.g. the add-item field's own hint
+      const stash = () => {
+        if (el.value !== ""){
+          el.dataset.prev = el.value;
+          el.placeholder = el.value;
+          el.value = "";
+        }
+      };
+      const restore = () => {
+        if (el.value.trim() === "" && el.dataset.prev !== undefined)
+          el.value = el.dataset.prev;
+        el.placeholder = ph0;
+        refresh(el, btn);
+      };
+      el.addEventListener("mousedown", stash);
+      el.addEventListener("focus", stash);
+      el.addEventListener("blur", restore);
+      el.addEventListener("keydown", e => { if (e.key === "Escape") { el.blur(); } });
+    }
   });
   countDirty();
 }
@@ -597,10 +697,15 @@ async function write(){
       body: JSON.stringify({path: cur, edits: collect()})});
     if (j.error){ msg.className="err"; msg.textContent = j.error; }
     else {
+      if (j.cloud) cloud = j.cloud;
+      const c = cloudOf(cur);
       msg.className="ok";
       msg.textContent = `wrote ${j.bytes} bytes · ${j.changed} fields changed` +
-                        (j.backup ? " · backup created" : "");
+                        (j.backup ? " · backup created" : "") +
+                        (c && c.state === "local-newer"
+                           ? " · launch via Steam to upload" : "");
       await open(cur);
+      loadSlots();          // refresh the badges now that this file has changed
     }
   } catch(e){ msg.className="err"; msg.textContent = e.message; }
   btn.disabled = false;
@@ -627,6 +732,7 @@ document.getElementById("writeraw").onclick = async () => {
 
 (async () => {
   cat = await api("/api/catalog");
+  buildNameMap();
   buildDatalists();
   document.getElementById("hdr").textContent =
     `${cat.items.length} items · ${cat.equipment.length} equipment · ${cat.runes.length} runes`;
@@ -651,6 +757,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
+    @staticmethod
+    def _cloud():
+        """Steam Cloud state, degraded gracefully -- never let it break the editor."""
+        try:
+            return cloudcheck.status()
+        except Exception as e:
+            return {"available": False, "reason": f"cloud check failed: {e}",
+                    "files": {}, "counts": {}}
+
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)
         q = urllib.parse.parse_qs(u.query)
@@ -665,7 +780,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 dirs = []
                 for d in ecsave.find_save_dirs():
                     dirs.append({"dir": d, "saves": ecsave.list_saves(d)})
-                return self._send(200, {"dirs": dirs})
+                return self._send(200, {"dirs": dirs, "cloud": self._cloud()})
+
+            if u.path == "/api/cloud":
+                return self._send(200, self._cloud())
 
             if u.path == "/api/save":
                 path = q.get("path", [""])[0]
@@ -698,7 +816,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 size = ecsave.write_save(path, obj)
                 remember(path, obj)
                 return self._send(200, {"ok": True, "bytes": size, "changed": changed,
-                                        "backup": not had_bak})
+                                        "backup": not had_bak,
+                                        "cloud": self._cloud()})
 
             if u.path == "/api/writeraw":
                 obj = payload.get("json")

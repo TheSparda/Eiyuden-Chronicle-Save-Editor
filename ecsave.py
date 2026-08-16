@@ -133,7 +133,10 @@ def catalog():
         return out
 
     return {
-        "equipment": rng(*EQUIP_ID_RANGE),
+        "equipment": rng(*EQUIP_ID_RANGE),          # every slot, for reference
+        "equipBySlot": {str(s): equip_candidates(s)
+                        for s in range(len(EQUIP_SLOT_LABELS))},
+        "equipSlotLabels": EQUIP_SLOT_LABELS,
         "runes": rng(*RUNE_ID_RANGE),
         "items": [{"id": i, "name": n, "max": item_max(i)}
                   for i, n in sorted(ITEM_NAMES.items())],
@@ -145,13 +148,71 @@ def item_name(item_id):
     return ITEM_NAMES.get(item_id, "")
 
 
-# Equipment slots are fixed: head, body, hands(?), accessory. The game stores four.
+# Equipment slots are fixed: head, body, hands (shields), accessory. The game stores four.
 EQUIP_SLOT_LABELS = ["Head", "Body", "Hands", "Accessory"]
 
-# Rough id ranges, used to offer a sensible shortlist per slot rather than all 1142.
-# Derived from the id ranges in the extracted table.
 EQUIP_ID_RANGE = (6000, 6999)
 RUNE_ID_RANGE = (7000, 7999)
+
+# Which ids belong to which slot. Established by tabulating every (slot, item) pair the
+# game itself has written across all saves, then reading off the id layout:
+#
+#   6000-6199  Head        helmets, hats, masks
+#   6200-6299  Head OR Body -- this block INTERLEAVES the two (Headband/Cloth Wear,
+#              Scarf/Traveler's Clothes, ...). The alternation is *almost* even=head /
+#              odd=body but not exactly (6233 "Crown of Guile" is odd yet sits on Head),
+#              so parity is not trusted; observation decides, and anything not yet
+#              observed is offered in both lists rather than hidden.
+#   6300-6599  Body        armour, mail, robes
+#   6600-6699  Hands       shields
+#   6700-6999  Accessory   badges, charms, rings
+EQUIP_SLOT_RANGES = {
+    0: [(6000, 6199)],
+    1: [(6300, 6599)],
+    2: [(6600, 6699)],
+    3: [(6700, 6999)],
+}
+EQUIP_AMBIGUOUS_RANGE = (6200, 6299)
+EQUIP_AMBIGUOUS_SLOTS = (0, 1)          # head or body
+
+_EQUIP_SLOTS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 "ec_equip_slots.json")
+
+
+def _load_equip_slots():
+    try:
+        with open(_EQUIP_SLOTS_PATH, encoding="utf-8") as f:
+            return {int(k): int(v) for k, v in json.load(f).items()}
+    except (OSError, ValueError):
+        return {}
+
+
+EQUIP_SLOT_OBSERVED = _load_equip_slots()
+
+
+def equip_candidates(slot):
+    """Items offerable in an equipment slot, most specific evidence first.
+
+    An id the game has actually been seen using in some slot is offered only there.
+    Otherwise the id ranges decide, and ids in the interleaved 6200-6299 block that we
+    have never observed are offered for both head and body. Nothing is truly locked out:
+    the UI accepts a raw id, so an unlisted item can still be entered deliberately.
+    """
+    lo_amb, hi_amb = EQUIP_AMBIGUOUS_RANGE
+    out = [{"id": 0, "name": ITEM_NAMES.get(0, "Nothing")}]
+    for i, name in sorted(ITEM_NAMES.items()):
+        if not (EQUIP_ID_RANGE[0] <= i <= EQUIP_ID_RANGE[1]):
+            continue
+        seen = EQUIP_SLOT_OBSERVED.get(i)
+        if seen is not None:
+            keep = (seen == slot)
+        elif lo_amb <= i <= hi_amb:
+            keep = slot in EQUIP_AMBIGUOUS_SLOTS
+        else:
+            keep = any(lo <= i <= hi for lo, hi in EQUIP_SLOT_RANGES.get(slot, []))
+        if keep:
+            out.append({"id": i, "name": name})
+    return out
 
 
 def decode_dotnet_datetime(value):

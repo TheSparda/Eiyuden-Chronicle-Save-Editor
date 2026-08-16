@@ -54,6 +54,11 @@ flags, scenario state, minigames, achievements, the lot.
 the game itself writes for that item, splitting oversized requests across stacks the way
 the game does (20 Healing Herbs → 6+6+6+2).
 
+**Slot-aware pickers.** Each equipment slot offers only gear that belongs there — helmets
+in Head, armour in Body, shields in Hands, accessories in Accessory. See
+[Equipment slots](#equipment-slots) for how the mapping was derived and where it stays
+deliberately permissive.
+
 **Edit affordances.** A changed field is highlighted and gets a ↺ button that restores its
 original value; the toolbar shows an unsaved-change count and a **Revert all**.
 
@@ -163,6 +168,37 @@ Note that Auto-Cloud syncs *every* file matching the game's pattern in the save 
 including stray copies you leave there. If you keep a scratch save like
 `UserData10Test.dat` alongside the real ones, Steam will happily upload that too.
 
+### Equipment slots
+
+Each of the four slots is restricted to gear that belongs in it. The mapping comes from
+tabulating every `(slot, item id)` pair the game itself has written across all local
+saves — 79 items observed, with **no item ever appearing in two different slots** — and
+reading off the resulting id layout:
+
+| ids | slot |
+|---|---|
+| 6000–6199 | Head (helmets, hats, masks) |
+| 6200–6299 | **interleaved** Head *and* Body |
+| 6300–6599 | Body (armour, mail, robes) |
+| 6600–6699 | Hands (shields) |
+| 6700–6999 | Accessory (badges, charms, rings) |
+
+The 6200–6299 block alternates head/body in pairs (Headband / Cloth Wear, Scarf /
+Traveler's Clothes, …). It is *almost* "even = head, odd = body", but not exactly — 6233
+"Crown of Guile" is odd yet the game equips it on Head — so parity is **not** used.
+Observation decides for items we have seen equipped; anything in that block we have not
+observed is offered in **both** the Head and Body lists rather than hidden.
+
+Nothing is ever truly locked out: the fields accept a raw id, so an unlisted item can
+still be entered deliberately. The filtering removes obviously-wrong categories without
+being able to block a legitimate edit.
+
+> The fully authoritative source would be `MasterData.EquipmentTable`'s `EquipPart`
+> field, but reaching it needs a live `MasterBundle` instance, which no static accessor
+> exposes — so it would require another runtime hook. The evidence-based mapping above
+> agrees with every observation and errs toward permissive, so that was not worth a
+> second dump.
+
 ### Name tables
 
 - **Items** (`ec_item_names.json`, 1142 entries) — extracted by `build_names.py` from the
@@ -184,13 +220,15 @@ ecsave.py                  save reader/writer + edit model  (also a CLI)
 eceditor.py                web server + embedded UI
 pydes.py                   pure-Python DES/TripleDES, CBC + PKCS7
 winbcrypt.py               optional native 3DES via Windows CNG (ctypes)
-cloudcheck.py              Steam Cloud sync status for every save
-build_names.py             builds the item-name and stack-max tables
+cloudcheck.py              Steam Cloud sync status (module + CLI; the editor uses it)
+build_names.py             builds the item-name, stack-max and equip-slot tables
+analyze_equip.py           working notes: how the equipment slot ranges were derived
 testutil.py                locates saves for the tests (no hardcoded paths)
 test_*.py, verify_py.py    self-tests (see below)
 plugin/                    BepInEx key/name dumper (C#) used for the recovery
 ec_item_names.json         1142 item ids -> names
 ec_item_maxes.json         observed per-item stack maxima
+ec_equip_slots.json        observed item -> equipment slot
 ec_unit_names.json         121 unit ids -> character names
 ```
 
