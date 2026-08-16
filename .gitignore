@@ -1,0 +1,26 @@
+# Captured from a running game / real saves -- contains the player's SteamID64 and the
+# full plaintext of their save data. Useful locally as verification fixtures, never
+# something to publish.
+dump/
+
+# Third-party material, not ours to redistribute:
+#  * the Suikoden IV editor clone this project is modeled on (its own repo)
+#  * the community Eiyuden Chronicle Cheat Engine table
+reference/
+
+# Save files and backups
+*.dat
+*.dat.bak
+*.bak
+
+# Build output
+plugin/bin/
+plugin/obj/
+__pycache__/
+*.pyc
+
+# Local run artifacts
+server.log
+server.err
+save_decoded.json
+_*.dat
