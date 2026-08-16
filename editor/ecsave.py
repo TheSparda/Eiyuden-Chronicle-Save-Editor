@@ -417,6 +417,7 @@ def summarize(obj):
             "index": i,
             "id": u.get("_id"),
             "name": unit_name(u.get("_id")),
+            "role": (UNIT_ROLES.get(u.get("_id")) or {}).get("unitType"),
             "exp": u.get("_exp"),
             "hp": u.get("_hp"),
             "mp": u.get("_mp"),
@@ -523,6 +524,68 @@ def _load_rune_holes():
 
 UNIT_RUNE_HOLES = _load_rune_holes()
 
+# Battle/support/castle-only classification, straight from the game's own UnitParamTable
+# (CanBattle/CanSupport and the raw UnitType enum) rather than inferred from save data --
+# unlike rune holes, this genuinely isn't in any save. Captured via a runtime hook against
+# a live, fully-recruited party so every character's true role is covered. "Other" means a
+# character is neither a battle nor a support unit: castle/story-only.
+_ROLES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "ec_unit_roles.json")
+
+
+def _load_unit_roles():
+    try:
+        with open(_ROLES_PATH, encoding="utf-8") as f:
+            return {int(k): v for k, v in json.load(f).items()}
+    except (OSError, ValueError):
+        return {}
+
+
+UNIT_ROLES = _load_unit_roles()
+
+# Real (exp, hp, mp, weaponLevel) samples per character, harvested the same way as the
+# rune-hole table. _hp/_mp turn out to be CURRENT hp/mp -- the same character at the same
+# exp shows different values across saves (battle damage) -- so there's no single "max"
+# to store. Recruiting instead picks the sample whose exp is closest to the hero's
+# current exp: a value that character has actually had, not a number borrowed from Nowa.
+_STATS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "ec_unit_stats.json")
+
+
+def _load_unit_stats():
+    try:
+        with open(_STATS_PATH, encoding="utf-8") as f:
+            raw = json.load(f)
+        return {int(k): [tuple(s) for s in v] for k, v in raw.items()}
+    except (OSError, ValueError):
+        return {}
+
+
+UNIT_STATS = _load_unit_stats()
+
+
+def _scaled_stats(unit_id, target_exp):
+    """This character's own hp/mp/weaponLevel, scaled to the hero's current exp.
+
+    Nearest-sample alone isn't enough: a character only ever seen recruited late-game
+    (e.g. every real sample near exp 62000) would hand an early save exp=3000 party a
+    late-game stat block wholesale -- a level-6-weapon, 400+ HP unit standing next to a
+    party still in double digits. Party exp is shared across every recruited character
+    (see decode_save), so the sample's own exp *is* what the hero's exp was when that
+    sample was taken; scaling hp/mp/weaponLevel by target_exp / sample_exp keeps the new
+    recruit's stats proportionate to where the sample actually came from, using only that
+    character's own real numbers -- never the hero's.
+    """
+    samples = UNIT_STATS.get(unit_id)
+    if not samples:
+        return None
+    exp, hp, mp, wl = min(samples, key=lambda s: abs(s[0] - target_exp))
+    if exp <= 0:
+        return None
+    ratio = target_exp / exp
+    return (max(1, round(hp * ratio)), max(1, round(mp * ratio)),
+            max(1, min(round(wl * ratio), max(s[3] for s in samples))))
+
 
 def _rune_holes_for(unit_id):
     """A freshly recruited character's holes: the right number for them, with only the
@@ -582,12 +645,33 @@ def roster(obj):
             "protected": uid in guard,
             "known": uid in UNIT_NAMES,
             "runeHoles": UNIT_RUNE_HOLES.get(uid),
+            "role": (UNIT_ROLES.get(uid) or {}).get("unitType"),
         })
     return out
 
 
+def _hero_record(obj):
+    """The player character's own unit record, if it's recruited (it always should be)."""
+    pid = obj.get("_personalUnitId")
+    for u in _units_of(obj):
+        if isinstance(u, dict) and u.get("_id") == pid:
+            return u
+    return None
+
+
 def _new_unit_record(obj, unit_id):
-    """A record shaped exactly like the ones already in this save."""
+    """A record shaped exactly like the ones already in this save.
+
+    EXP always matches the player character, so a freshly recruited unit is at the
+    party's level rather than a fresh level 1 (a unit added with 0 EXP/0 HP is recruited
+    dead -- confirmed in testing, Chandra spawned into battle at 0/0 as a corpse).
+
+    HP/MP/weapon level are NOT copied from the hero -- they're that character's own real
+    numbers (harvested from other local saves), scaled to the hero's current exp so an
+    early recruit doesn't inherit a late-game stat block. If this exact character has
+    never been observed recruited anywhere, the hero's own numbers are the fallback --
+    alive beats exactly accurate.
+    """
     existing = [u for u in _units_of(obj) if isinstance(u, dict)]
     base = json.loads(json.dumps(existing[0])) if existing \
         else json.loads(json.dumps(UNIT_TEMPLATE))
@@ -598,6 +682,19 @@ def _new_unit_record(obj, unit_id):
             fresh[key] = base[key]
     fresh["_id"] = int(unit_id)
     fresh["_runeHoles"] = _rune_holes_for(int(unit_id))
+
+    hero = _hero_record(obj)
+    hero_exp = hero.get("_exp") if hero else None
+    own = _scaled_stats(int(unit_id), hero_exp) if hero_exp else None
+    if hero_exp is not None:
+        fresh["_exp"] = hero_exp
+    if own:
+        fresh["_hp"], fresh["_mp"], fresh["_weaponLevel"] = own
+    elif hero:
+        # no data for this character at all: better alive at the hero's numbers than dead
+        fresh["_hp"] = hero.get("_hp", fresh["_hp"])
+        fresh["_mp"] = hero.get("_mp", fresh["_mp"])
+        fresh["_weaponLevel"] = hero.get("_weaponLevel", fresh["_weaponLevel"])
     return fresh
 
 
@@ -698,13 +795,42 @@ def apply_edits(obj, edits):
                     if slot < len(equip) and item_id is not None:
                         equip[slot] = int(item_id)
                         changed += 1
-            elif key == "_runeHoles" and isinstance(val, list):
+            elif key == "_runeHoleReleased" and isinstance(val, dict):
+                # Unlocking a rune hole. Across 353 real holes, a locked one
+                # (_released false) never once held a rune, so that invariant is enforced
+                # here: re-locking a hole clears whatever was in it. Both
+                # (released, viewed) = (True, True) and (True, False) occur in real
+                # saves; the settled one is used so the game doesn't replay the unlock
+                # effect. Runs before _runeHoles below so a slot can be unlocked and
+                # filled in the same write.
                 holes = unit.get("_runeHoles") or []
-                for slot, item_id in enumerate(val):
-                    if slot < len(holes) and isinstance(holes[slot], dict) \
-                            and item_id is not None:
-                        holes[slot]["_itemId"] = int(item_id)
-                        changed += 1
+                for slot, released in (val or {}).items():
+                    slot = int(slot)
+                    if not (0 <= slot < len(holes)) or not isinstance(holes[slot], dict):
+                        continue
+                    released = bool(released)
+                    holes[slot]["_released"] = released
+                    holes[slot]["_isViewedReleaseEffect"] = released
+                    if not released:
+                        holes[slot]["_itemId"] = 0
+                    changed += 1
+
+    # second pass: rune contents, after any unlocks above have been applied
+    for idx, fields in (edits.get("units") or {}).items():
+        i = int(idx)
+        if not (0 <= i < len(units)) or not isinstance(units[i], dict):
+            continue
+        val = (fields or {}).get("_runeHoles")
+        if isinstance(val, list):
+            holes = units[i].get("_runeHoles") or []
+            for slot, item_id in enumerate(val):
+                if slot < len(holes) and isinstance(holes[slot], dict) \
+                        and item_id is not None:
+                    # a rune can only sit in an unlocked hole
+                    if not holes[slot].get("_released") and int(item_id):
+                        continue
+                    holes[slot]["_itemId"] = int(item_id)
+                    changed += 1
 
     inventory = obj.setdefault("_inventory", {})
     items = inventory.setdefault("_items", [])

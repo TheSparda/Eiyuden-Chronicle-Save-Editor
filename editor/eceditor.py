@@ -151,7 +151,19 @@ td{vertical-align:top}
 .slotcell{display:flex;align-items:center;gap:5px}
 .slotcell .lab{color:var(--muted);font-size:10px;width:52px;flex:0 0 52px;
   text-transform:uppercase;letter-spacing:.05em}
-.slotcell.locked{color:var(--muted);font-size:11px;font-style:italic;opacity:.6}
+.slotcell.locked{color:var(--muted);font-size:11px;font-style:italic;opacity:.75}
+.unlock{background:transparent;border:1px dashed var(--line2);color:var(--muted);
+  border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;box-shadow:none;
+  font-weight:400;letter-spacing:0;font-style:normal}
+.unlock:hover{border-style:solid;border-color:var(--gold);color:var(--gold-hi);
+  background:rgba(217,180,73,.12)}
+.slotcell.unlocking{opacity:1}
+.slotcell.unlocking .pick{border-color:var(--gold-hi);
+  background:linear-gradient(180deg,rgba(242,221,154,.16),rgba(217,180,73,.07))}
+.relock{background:transparent;border:1px solid var(--line);color:var(--muted);
+  border-radius:4px;padding:1px 6px;font-size:10px;cursor:pointer;box-shadow:none;
+  font-weight:400;letter-spacing:0}
+.relock:hover{color:var(--err);border-color:var(--err)}
 .additem{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;
   padding:12px;border:1px solid var(--line);border-radius:5px;margin-top:10px;
   background:linear-gradient(180deg,rgba(217,180,73,.07),rgba(0,0,0,.18))}
@@ -166,16 +178,59 @@ tr.added td{background:rgba(158,196,107,.12)}
 .chk{color:var(--fg)}
 
 /* roster */
-.rostergrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));
-  gap:2px 10px;margin-top:8px}
-.rost{display:flex;align-items:center;gap:6px;font-size:12px;padding:2px 4px;
-  border-radius:3px}
-.rost input{width:auto;margin:0;flex:0 0 auto}
-.rost.have{color:var(--fg)}
+.rosterprog{display:flex;align-items:center;gap:10px;margin:6px 0 10px}
+.rosterprog .bar{flex:1;height:6px;border-radius:99px;background:rgba(0,0,0,.35);
+  overflow:hidden;border:1px solid var(--line)}
+.rosterprog .fill{height:100%;
+  background:linear-gradient(90deg,var(--gold-dim),var(--gold-hi));
+  transition:width .2s ease}
+.rosterprog .n{font-size:12px;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+
+.rostergrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));
+  gap:8px;margin-top:8px}
+.rost{position:relative;display:flex;align-items:center;gap:8px;font-size:12px;
+  padding:8px 10px;border-radius:6px;cursor:pointer;user-select:none;
+  border:1px solid var(--line);background:rgba(0,0,0,.14);
+  border-left:3px solid transparent;transition:background .12s,border-color .12s}
+.rost input{position:absolute;opacity:0;width:0;height:0}
+.rost:hover{background:rgba(217,180,73,.07)}
+.rost.have{border-left-color:var(--ok);background:rgba(158,196,107,.07)}
+.rost.have:hover{background:rgba(158,196,107,.12)}
 .rost.miss{color:var(--muted)}
-.rost.locked{opacity:.55}
-.rost.changed{background:rgba(242,221,154,.14);outline:1px solid var(--gold-dim)}
-.rost .rid{color:var(--muted);font-size:10px;margin-left:auto}
+.rost.locked{cursor:default;opacity:.7}
+.rost.locked:hover{background:rgba(0,0,0,.14)}
+.rost.changed{outline:1px solid var(--gold-hi);
+  box-shadow:0 0 0 3px rgba(217,180,73,.15)}
+
+/* toggle switch standing in for the native checkbox */
+.rost .sw{flex:0 0 auto;width:30px;height:17px;border-radius:99px;
+  background:rgba(255,255,255,.08);border:1px solid var(--line2);position:relative;
+  transition:background .15s,border-color .15s}
+.rost .sw::after{content:"";position:absolute;top:1px;left:1px;width:13px;height:13px;
+  border-radius:50%;background:var(--muted);transition:transform .15s,background .15s}
+.rost.have .sw{background:rgba(158,196,107,.28);border-color:#5c7a3c}
+.rost.have .sw::after{transform:translateX(13px);background:var(--ok)}
+.rost:not(.locked):hover .sw::after{filter:brightness(1.2)}
+.rost.locked .sw{opacity:.6}
+.rost.locked .sw::after{background:var(--gold-dim)}
+
+.rost .info{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.rost .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-weight:600;color:var(--fg)}
+.rost.miss .name{font-weight:400;color:var(--muted)}
+.rost .meta{display:flex;gap:6px;font-size:10px;color:var(--muted)}
+.rost .lockbadge{font-size:9px;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--gold-dim)}
+.role{display:inline-block;margin-left:6px;padding:0 5px;border-radius:3px;
+  font-size:9px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  vertical-align:middle;border:1px solid}
+.role.battle{color:#e08a5c;border-color:#8a4f2c;background:rgba(224,138,92,.12)}
+.role.support{color:#7fb3d5;border-color:#3d6a8a;background:rgba(127,179,213,.12)}
+.role.hybrid{color:#c793e0;border-color:#6a3d8a;background:rgba(199,147,224,.12)}
+.role.other{color:var(--muted);border-color:var(--line);background:rgba(255,255,255,.04)}
+.rost.changed::after{content:"●";position:absolute;top:-6px;right:-6px;
+  color:var(--gold-hi);font-size:13px;text-shadow:0 0 4px rgba(0,0,0,.6)}
+
 .rosterbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:6px}
 .rosterbar input[type=search]{width:190px}
 
@@ -260,6 +315,11 @@ button:disabled{opacity:.45;cursor:not-allowed}
   border-image:linear-gradient(90deg,transparent,var(--gold-dim) 15%,var(--gold-hi) 50%,
     var(--gold-dim) 85%,transparent) 1;
   box-shadow:0 -3px 14px rgba(0,0,0,.5)}
+.madeby{text-align:center;padding:16px 12px 22px;font-size:12px;color:var(--muted);
+  letter-spacing:.02em}
+.madeby a{color:var(--gold);text-decoration:none;border-bottom:1px solid transparent;
+  transition:color .12s,border-color .12s}
+.madeby a:hover{color:var(--gold-hi);border-bottom-color:var(--gold-dim)}
 #msg{font-size:13px}
 .ok{color:var(--ok)}.err{color:var(--err)}.warn{color:var(--warn)}
 textarea{width:100%;height:460px;background:rgba(8,5,2,.75);color:var(--fg);
@@ -306,6 +366,7 @@ textarea:focus{outline:none;border-color:var(--gold)}
       <div class="tabs">
         <div class="tab active" data-t="meta">Overview</div>
         <div class="tab" data-t="chars">Characters</div>
+        <div class="tab" data-t="roster">Recruit</div>
         <div class="tab" data-t="inv">Inventory</div>
         <div class="tab" data-t="raw">Raw JSON</div>
       </div>
@@ -324,9 +385,16 @@ textarea:focus{outline:none;border-color:var(--gold)}
   </div>
 </div>
 
+<footer class="madeby">
+  Made by <a href="https://github.com/TheSparda" target="_blank" rel="noopener">Sparda</a>
+  · <a href="https://github.com/TheSparda/Eiyuden-Chronicle-Save-Editor" target="_blank"
+        rel="noopener">source on GitHub</a>
+</footer>
+
 <script>
 let cur = null, data = null, cat = null, cloud = null;
 let pendingRemove = new Set(), pendingAdd = [];
+let pendingUnlock = new Set();          // "unitIndex:slot" for rune holes to unlock
 
 const cloudOf = path => {
   if (!cloud || !cloud.available) return null;
@@ -471,6 +539,7 @@ async function open(path, node){
   cur = path;
   pendingRemove = new Set();
   pendingAdd = [];
+  pendingUnlock = new Set();
   data = await api("/api/save?path=" + encodeURIComponent(path));
   if (data.error){ document.getElementById("editor").innerHTML =
      '<span class="err">'+data.error+'</span>'; return; }
@@ -547,19 +616,33 @@ function render(){
 
   const SLOTS = ["Head","Body","Hands","Accessory"];
 
-  // --- Characters pane: roster + per-unit editing
-  h += `</div><div class="subpane" id="sp-chars">`;
+  // --- Recruit pane: the full roster
+  h += `</div><div class="subpane" id="sp-roster">`;
 
-  h += `<h3 style="font-size:13px;color:var(--muted);margin:4px 0 6px">
-          ROSTER — ${s.recruitedCount} of ${s.knownCount} recruited</h3>
-    <div class="banner info"><b>Recruiting is experimental.</b>
-      A character counts as recruited by having a record in the save, and the record this
-      writes matches the game's own exactly — including the right number of rune holes for
-      that character. What is <i>not</i> proven is whether the game also expects a
-      recruitment flag elsewhere; a character added here may not behave identically to one
-      recruited in-game. A backup is made before writing.</div>
+  const rostPct = s.knownCount ? Math.round(100 * s.recruitedCount / s.knownCount) : 0;
+  h += `<h3 style="font-size:13px;color:var(--muted);margin:4px 0 6px">ROSTER</h3>
+    <div class="rosterprog">
+      <div class="bar"><div class="fill" style="width:${rostPct}%"></div></div>
+      <span class="n">${s.recruitedCount} / ${s.knownCount} recruited (${rostPct}%)</span>
+    </div>
+    <div class="banner info"><b>Recruiting works, but treat it as experimental.</b>
+      Confirmed in-game: a recruited character loads into the party and into battle. EXP
+      matches your player character, so they arrive at the party's level. HP/MP/weapon
+      level are that character's <i>own</i> real numbers — not your player character's —
+      scaled to match, so an early recruit doesn't inherit a stat block from wherever
+      they were last seen recruited. Rune holes match that character's real count. What's
+      <i>not</i> set: equipment (starts empty) and any recruitment-specific story flag, so
+      content gated on "how you recruited them" may not trigger. A backup is made before
+      writing.</div>
     <div class="rosterbar">
       <input type="search" id="rostfilter" placeholder="filter by name or id…">
+      <select id="rostroletype">
+        <option value="">All roles</option>
+        <option value="Battle">Battle</option>
+        <option value="Support">Support</option>
+        <option value="Hybrid">Hybrid</option>
+        <option value="Other">Castle-only</option>
+      </select>
       <label class="chk"><input type="checkbox" id="rostonlymissing"> only missing</label>
       <button class="ghost" type="button" id="rostall">Recruit all</button>
       <button class="ghost" type="button" id="rostnone">Undo roster changes</button>
@@ -568,18 +651,30 @@ function render(){
     <div class="rostergrid" id="rostergrid">`;
   for (const c of s.roster){
     const cls = (c.recruited ? "have" : "miss") + (c.protected ? " locked" : "");
-    const holes = c.runeHoles == null ? "" : ` · ${c.runeHoles} rune slots`;
-    h += `<label class="rost ${cls}" data-rost="${c.id}"
+    const holes = c.runeHoles == null ? "" : `${c.runeHoles} rune slot${c.runeHoles===1?"":"s"}`;
+    const meta = c.protected ? `<span class="lockbadge">🔒 in party</span>`
+                             : [holes].filter(Boolean).join(" · ");
+    const role = c.role || "";
+    const roleBadge = role
+      ? `<span class="role ${role.toLowerCase()}">${role === "Other" ? "Castle" : role}</span>` : "";
+    h += `<label class="rost ${cls}" data-rost="${c.id}" data-role="${role}"
              title="${c.protected ? "In your party or the player character — remove in-game first"
-                                  : (c.name + holes)}">
+                                  : c.name}">
             <input type="checkbox" data-recruit="${c.id}"
                    ${c.recruited ? "checked" : ""} ${c.protected ? "disabled" : ""}>
-            <span>${c.name}</span><span class="rid">${c.id}</span></label>`;
+            <span class="sw"></span>
+            <span class="info">
+              <span class="name">${c.name}${roleBadge}</span>
+              <span class="meta"><span>#${c.id}</span>${meta ? " · "+meta : ""}</span>
+            </span></label>`;
   }
   h += `</div>`;
 
+  // --- Characters pane: per-unit stats and gear
+  h += `</div><div class="subpane" id="sp-chars">`;
+
   if (s.units.length){
-    h += `<h3 style="font-size:13px;color:var(--muted);margin:18px 0 6px">
+    h += `<h3 style="font-size:13px;color:var(--muted);margin:4px 0 6px">
             UNITS (${s.units.length})</h3>
       <div class="hint">Equipment and runes accept a name or a raw id — start typing to search.</div>
       <div class="tablewrap"><table><tr><th>#</th><th>Unit</th><th>EXP</th><th>HP</th><th>MP</th>
@@ -596,11 +691,16 @@ function render(){
           ? `<div class="slotcell"><input class="pick" list="dl_rune"
                data-u="${u.index}" data-rune="${i}"
                value="${labelFor(r)}"></div>`
-          : `<div class="slotcell locked">slot ${i+1} locked</div>`
+          : `<div class="slotcell locked" data-holecell="${u.index}:${i}">
+               <button class="unlock" type="button"
+                       data-unlock="${u.index}:${i}" data-slot="${i}"
+                       title="Unlock this rune slot">🔒 slot ${i+1}</button></div>`
       ).join("") + `</div>`;
 
+      const roleBadge = u.role
+        ? `<span class="role ${u.role.toLowerCase()}">${u.role === "Other" ? "Castle" : u.role}</span>` : "";
       h += `<tr><td>${u.index}</td>
-        <td>${u.name}<div class="itemname">${u.id}</div></td>
+        <td>${u.name}${roleBadge}<div class="itemname">${u.id}</div></td>
         <td><input class="narrow" type="number" data-u="${u.index}" data-k="_exp" value="${u.exp}"></td>
         <td><input class="narrow" type="number" data-u="${u.index}" data-k="_hp" value="${u.hp}"></td>
         <td><input class="narrow" type="number" data-u="${u.index}" data-k="_mp" value="${u.mp}"></td>
@@ -674,8 +774,51 @@ function render(){
   document.getElementById("revertall").onclick = revertAll;
   wireInventory();
   wireRoster();
+  wireUnlocks();
   decorate();
   showTab(activeTab === "raw" ? "meta" : activeTab);   // keep the tab across reloads
+}
+
+/* Clicking a locked rune slot marks it to be unlocked and swaps in a live rune picker,
+   so the slot can be unlocked and filled in the same write. Clicking the small ↩ puts it
+   back to locked (and drops anything typed, matching the game's own invariant that a
+   locked hole never holds a rune). */
+function wireUnlocks(){
+  document.querySelectorAll("[data-unlock]").forEach(btn => {
+    btn.onclick = () => {
+      const key = btn.dataset.unlock;
+      const [uIdx, slot] = key.split(":");
+      const cell = document.querySelector(`[data-holecell="${key}"]`);
+      pendingUnlock.add(key);
+      cell.classList.remove("locked");
+      cell.classList.add("unlocking");
+      cell.innerHTML =
+        `<input class="pick" list="dl_rune" data-u="${uIdx}" data-rune="${slot}"
+                value="0 — Nothing">
+         <button class="relock" type="button" data-relock="${key}"
+                 title="Leave this slot locked">↩</button>`;
+      wireRelock(cell);
+      decorate();
+      countDirty();
+    };
+  });
+}
+
+function wireRelock(cell){
+  const btn = cell.querySelector("[data-relock]");
+  if (!btn) return;
+  btn.onclick = () => {
+    const key = btn.dataset.relock;
+    const [uIdx, slot] = key.split(":");
+    pendingUnlock.delete(key);
+    cell.classList.remove("unlocking");
+    cell.classList.add("locked");
+    cell.innerHTML = `<button class="unlock" type="button"
+        data-unlock="${key}" data-slot="${slot}"
+        title="Unlock this rune slot">🔒 slot ${Number(slot)+1}</button>`;
+    wireUnlocks();
+    countDirty();
+  };
 }
 
 function wireRoster(){
@@ -686,6 +829,8 @@ function wireRoster(){
     const row = box.closest(".rost");
     const changed = String(box.checked) !== box.dataset.orig;
     row.classList.toggle("changed", changed);
+    row.classList.toggle("have", box.checked);
+    row.classList.toggle("miss", !box.checked && !row.classList.contains("locked"));
     rosterNote();
   };
   grid.querySelectorAll("[data-recruit]").forEach(box => {
@@ -696,15 +841,18 @@ function wireRoster(){
   const applyFilter = () => {
     const q = (document.getElementById("rostfilter").value || "").toLowerCase().trim();
     const onlyMissing = document.getElementById("rostonlymissing").checked;
+    const role = document.getElementById("rostroletype").value;
     grid.querySelectorAll(".rost").forEach(row => {
       const box = row.querySelector("[data-recruit]");
       const hay = row.textContent.toLowerCase();
-      const show = (!q || hay.includes(q)) && (!onlyMissing || !box.checked);
+      const show = (!q || hay.includes(q)) && (!onlyMissing || !box.checked)
+                 && (!role || row.dataset.role === role);
       row.style.display = show ? "" : "none";
     });
   };
   document.getElementById("rostfilter").addEventListener("input", applyFilter);
   document.getElementById("rostonlymissing").addEventListener("change", applyFilter);
+  document.getElementById("rostroletype").addEventListener("change", applyFilter);
 
   document.getElementById("rostall").onclick = () => {
     grid.querySelectorAll("[data-recruit]:not(:disabled)").forEach(b => {
@@ -738,6 +886,17 @@ function rosterNote(){
   const el = document.getElementById("rostnote");
   if (el) el.textContent = (add || rem)
     ? `${add} to recruit, ${rem} to remove` : "";
+
+  // the progress bar reflects the pending state, not just what's on disk
+  const total = document.querySelectorAll("[data-recruit]").length;
+  const checked = document.querySelectorAll("[data-recruit]:checked").length;
+  const fill = document.querySelector(".rosterprog .fill");
+  const label = document.querySelector(".rosterprog .n");
+  if (fill && total){
+    const pct = Math.round(100 * checked / total);
+    fill.style.width = pct + "%";
+    label.textContent = `${checked} / ${total} recruited (${pct}%)`;
+  }
   countDirty();
 }
 
@@ -841,7 +1000,7 @@ function refresh(el, btn){
 function countDirty(){
   const rosterN = document.querySelectorAll("#editor .rost.changed").length;
   const n = document.querySelectorAll("#editor .dirty").length
-          + pendingRemove.size + pendingAdd.length + rosterN;
+          + pendingRemove.size + pendingAdd.length + rosterN + pendingUnlock.size;
   const el = document.getElementById("dirtycount");
   if (el) el.textContent = n ? `${n} unsaved change${n>1?"s":""}` : "";
 }
@@ -921,6 +1080,7 @@ function revertAll(){
   });
   pendingRemove = new Set();
   pendingAdd = [];
+  document.querySelectorAll("[data-relock]").forEach(b => b.click());   // re-lock slots
   document.querySelectorAll("tr.removed").forEach(r => r.classList.remove("removed"));
   document.querySelectorAll("[data-rm]").forEach(b => b.textContent = "remove");
   renderPendingAdds();
@@ -955,6 +1115,13 @@ function collect(){
       }
     }
   });
+
+  for (const key of pendingUnlock){
+    const [i, slot] = key.split(":");
+    units[i] = units[i] || {};
+    units[i]._runeHoleReleased = units[i]._runeHoleReleased || {};
+    units[i]._runeHoleReleased[slot] = true;
+  }
   document.querySelectorAll("[data-i]").forEach(el => {
     const i = el.dataset.i;
     items[i] = items[i] || {};
@@ -998,7 +1165,8 @@ async function write(){
 /* Overview / Characters / Inventory are sub-panes inside the editor (they share one
    render and one Write bar); Raw JSON is a separate pane. */
 let activeTab = "meta";
-const SUBPANES = {meta: "sp-meta", chars: "sp-chars", inv: "sp-inv"};
+const SUBPANES = {meta: "sp-meta", chars: "sp-chars", roster: "sp-roster",
+                  inv: "sp-inv"};
 
 function showTab(name){
   activeTab = name;

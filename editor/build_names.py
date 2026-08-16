@@ -117,3 +117,38 @@ json.dump({str(k): v for k, v in sorted(holes.items())},
           open(HOLES_OUT, "w", encoding="utf-8"), indent=0)
 print(f"wrote {HOLES_OUT} ({len(holes)} characters; "
       f"{len(bad)} disagreed across saves{': ' + str(bad) if bad else ''})")
+
+# --- per-character HP/MP/weapon-level samples -------------------------------------
+# _hp/_mp turn out to be CURRENT hp/mp, not a fixed max -- the same character at the
+# same _exp shows different values across saves (battle damage). So there's no single
+# "this character's max HP" to store; instead we keep every (exp, hp, mp, weaponLevel)
+# sample seen for each character, and recruiting picks whichever sample's exp is
+# closest to the hero's current exp -- a real value that character has actually had,
+# rather than the hero's own HP/MP borrowed wholesale.
+STATS_OUT = os.path.join(HERE, "ec_unit_stats.json")
+stats = collections.defaultdict(list)
+for save_dir in ecsave.find_save_dirs():
+    for s in ecsave.list_saves(save_dir):
+        try:
+            obj = ecsave.load_json(s["path"])
+        except Exception:
+            continue
+        for u in (obj.get("_unitData") or {}).get("_units") or []:
+            uid = u.get("_id")
+            exp, hp, mp = u.get("_exp"), u.get("_hp"), u.get("_mp")
+            # skip records that are dead/placeholder (0 HP with 0 EXP) -- these are
+            # unrecruited slots or artifacts from testing this very feature, not real
+            # recruited-character data
+            if uid is None or not exp or hp is None or mp is None:
+                continue
+            wl = u.get("_weaponLevel", 1)
+            sample = [exp, hp, mp, wl]
+            if sample not in stats[uid]:
+                stats[uid].append(sample)
+
+for uid in stats:
+    stats[uid].sort()
+json.dump({str(k): v for k, v in sorted(stats.items())},
+          open(STATS_OUT, "w", encoding="utf-8"), indent=0)
+total_samples = sum(len(v) for v in stats.values())
+print(f"wrote {STATS_OUT} ({len(stats)} characters, {total_samples} samples)")

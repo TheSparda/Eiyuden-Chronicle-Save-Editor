@@ -143,6 +143,14 @@ reconstructed record against a save where that character was genuinely recruited
 The player character and anyone currently placed in a party are **protected** — their
 checkbox is disabled, because dropping them risks a save the game can't load.
 
+**Role badges.** Every character is tagged Battle, Support, Hybrid, or Castle (neither),
+filterable in the Recruit tab and shown in Characters. Unlike rune holes or stats, this
+genuinely isn't derivable from any save — there's no field for it. It comes straight from
+the game's own `UnitParamTable` (`CanBattle`/`CanSupport` plus the raw `UnitType` enum),
+captured via the same runtime-hook approach used to recover the encryption key, this time
+against a save with the full roster recruited. All 121 known characters are covered, and
+the raw enum agrees with the derived flags for every one of them (`test_roles.py`).
+
 ### Equipment slots
 
 Each slot only offers gear that belongs in it. The mapping comes from tabulating every
@@ -255,6 +263,7 @@ ec_item_maxes.json         observed per-item stack maxima
 ec_equip_slots.json        observed item -> equipment slot
 ec_unit_names.json         121 unit ids -> character names
 ec_unit_runeholes.json     per-character rune-hole counts
+ec_unit_roles.json         per-character Battle/Support/Hybrid/Other classification
 ```
 
 Not in the repo, by design: `dump/` (captured plaintext saves — they contain the player's
@@ -274,6 +283,7 @@ py test_write.py       # full edit -> write -> read-back cycle on a scratch copy
 py test_difficulty.py  # difficulty mapping against ground-truth Hard/Normal saves
 py test_items.py       # inventory add/remove, stack splitting, equipment naming
 py test_roster.py      # recruiting: record shape, rune holes, removal guards
+py test_roles.py       # role classification: coverage and internal consistency
 py test_cache.py       # session cache (needs the editor running)
 ```
 
