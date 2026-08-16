@@ -24,3 +24,6 @@ server.log
 server.err
 save_decoded.json
 _*.dat
+
+# AI-assistant handoff notes -- local dev aid, not part of the published project
+AGENTS.md
