@@ -9,6 +9,8 @@ nothing uploaded. Built in the same spirit as the
 [Suikoden IV Editor](https://github.com/TheSparda/Suikoden-4-Save-Editor) it's modeled on:
 **never write unverified data.**
 
+Feature requests/Support avail on the Toran Castle Discord: https://discord.gg/KesHMX5P2Z
+
 ---
 
 ## Run
