@@ -1,0 +1,16 @@
+{
+  "name": "Eiyuden Chronicle Save Editor",
+  "short_name": "EC Save Editor",
+  "description": "Edit Eiyuden Chronicle: Hundred Heroes saves entirely on your device. Nothing is uploaded.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#150e05",
+  "theme_color": "#150e05",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

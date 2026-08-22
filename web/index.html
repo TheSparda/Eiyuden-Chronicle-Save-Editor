@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#150e05">
+  <meta name="description" content="Edit Eiyuden Chronicle: Hundred Heroes saves entirely on your device. Nothing is uploaded.">
+  <title>Eiyuden Chronicle Save Editor (Web)</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+</head>
+<body>
+
+<header>
+  <h1>Eiyuden Chronicle · Save Editor</h1>
+  <span class="sub" id="hdr">TripleDES-CBC · verified round-trip · runs in your browser</span>
+  <button id="installBtn" class="ghost hidden" style="margin-left:auto">⬇ Install app</button>
+</header>
+
+<div class="wrap">
+  <div class="side">
+    <div class="card">
+      <h2>Open a save</h2>
+      <div class="body">
+        <div class="drop" id="drop">
+          <div><b>Drop a save file here</b></div>
+          <div class="sub" style="margin:6px 0">or</div>
+          <label class="filebtn"><button type="button" id="pickBtn" class="ghost" disabled>Choose file…</button>
+            <input type="file" id="file" hidden></label>
+          <div class="sub" id="engineStatus" style="margin-top:10px">
+            <span class="spin">Starting Python engine…</span></div>
+        </div>
+        <div class="hint" style="margin-top:8px">
+          Pick a <code>UserData<i>NN</i>.dat</code> file from your game's save folder.
+          It never leaves your device.
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Loaded</h2>
+      <div id="slots"><div class="body sub">No save loaded yet.</div></div>
+    </div>
+    <div class="card">
+      <h2>Safety</h2>
+      <div class="body sub">
+        Close the game before copying an edited save back — it caches saves in memory and
+        will overwrite your changes on exit.<br><br>
+        This tool edits a <b>copy</b>: your original file is never touched. After you write,
+        an edited <code>.dat</code> downloads — copy it back into your save folder yourself.
+        <div id="cloudsummary" style="margin-top:10px"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="card">
+      <div class="tabs">
+        <div class="tab active" data-t="meta">Overview</div>
+        <div class="tab" data-t="chars">Characters</div>
+        <div class="tab" data-t="roster">Recruit</div>
+        <div class="tab" data-t="inv">Inventory</div>
+        <div class="tab" data-t="raw">Raw JSON</div>
+      </div>
+      <div id="pane-edit">
+        <div class="body" id="editor"><span class="sub">Open a save file to begin.</span></div>
+      </div>
+      <div id="pane-raw" style="display:none">
+        <div class="note">Full decrypted save. Editing here overwrites the whole file —
+          it must stay valid JSON.</div>
+        <div class="body">
+          <textarea id="rawbox" spellcheck="false"></textarea>
+          <div style="margin-top:10px"><button id="writeraw">Write raw JSON</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<footer class="madeby">
+  Made by <a href="https://github.com/TheSparda" target="_blank" rel="noopener">Sparda</a>
+  · <a href="https://github.com/TheSparda/Eiyuden-Chronicle-Save-Editor" target="_blank"
+        rel="noopener">source on GitHub</a>
+  · runs 100% in your browser
+</footer>
+
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
