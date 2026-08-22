@@ -27,3 +27,7 @@ _*.dat
 
 # AI-assistant handoff notes -- local dev aid, not part of the published project
 AGENTS.md
+
+# web editor test tooling (not shipped)
+web/node_modules/
+web/package-lock.json

@@ -10,5 +10,8 @@
     "test:validate": "node tests/validate.mjs",
     "test:roundtrip": "node tests/save-roundtrip.mjs",
     "test:e2e": "node tests/e2e.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.62.1"
   }
 }
