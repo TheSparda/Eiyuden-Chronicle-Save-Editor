@@ -140,12 +140,16 @@ async function grab(url) {
 }
 
 async function bootPyodide() {
+  bootProgress(10, "Downloading Python runtime… (~10 MB, first load only)");
   const py = await loadPyodide();
+  bootProgress(70, "Loading save engine…");
   for (const m of PY_MODULES)
     py.FS.writeFile(m, await (await grab(EDITOR_BASE + m)).text());
+  bootProgress(85, "Loading reference tables…");
   for (const j of PY_JSON)
     py.FS.writeFile(j, await (await grab(EDITOR_BASE + j)).text());
   py.runPython(GLUE);
+  bootProgress(100, "Engine ready.");
   PY = py;
   return py;
 }
@@ -186,15 +190,13 @@ async function api(u, opt) {
   }
   if (p === "/api/write") {
     await nextPaint();
-    const res = JSON.parse(pyCall("api_write", body.path, JSON.stringify(body.edits || {})));
-    if (res.ok) downloadSave(body.path);
-    return res;
+    // Output (download / save-in-place / share) is decided by the caller after review,
+    // not here — see write() and finishOutput() in the enhancements section.
+    return JSON.parse(pyCall("api_write", body.path, JSON.stringify(body.edits || {})));
   }
   if (p === "/api/writeraw") {
     await nextPaint();
-    const res = JSON.parse(pyCall("api_writeraw", body.path, JSON.stringify(body.json || {})));
-    if (res.ok) downloadSave(body.path);
-    return res;
+    return JSON.parse(pyCall("api_writeraw", body.path, JSON.stringify(body.json || {})));
   }
   return { error: "not found: " + p };
 }
@@ -214,8 +216,10 @@ function downloadSave(path) {
 }
 
 /* User picked / dropped a file: write it into MEMFS under its real name, register it,
-   refresh the slot list, then open it. */
-async function handleFile(file) {
+   refresh the slot list, then open it. `handle` is a FileSystemFileHandle when the file
+   was opened via the File System Access picker (desktop) — it enables save-in-place.
+   `remember` persists the opened bytes for the ↻ Last-opened chip. */
+async function handleFile(file, handle, remember = true) {
   await pyReady;
   const editor = document.getElementById("editor");
   editor.innerHTML = '<span class="spin">reading file…</span>';
@@ -225,6 +229,8 @@ async function handleFile(file) {
     const path = "/saves/" + file.name;
     PY.FS.writeFile(path, buf);
     if (!LOADED.find(x => x.path === path)) LOADED.push({ path, name: file.name });
+    if (handle) HANDLES[path] = handle; else delete HANDLES[path];
+    if (remember) rememberLastOpened(file.name, buf).catch(() => {});
     await loadSlots();
     const node = document.querySelector(`.slot[data-p="${encodeURIComponent(path)}"]`);
     await open(path, node);
@@ -244,6 +250,8 @@ async function boot() {
       `${cat.items.length} items · ${cat.equipment.length} equipment · ${cat.runes.length} runes`;
     engineStatus.innerHTML = '<span class="ok">Engine ready — open a save file.</span>';
     document.getElementById("pickBtn").disabled = false;
+    refreshLastOpenedChip().catch(() => {});
+    await maybeConsumeSharedFile();          // a file shared into the installed PWA
   } catch (e) {
     engineStatus.innerHTML = '<span class="err">Engine failed to start: ' + e.message + '</span>';
     throw e;
@@ -1071,15 +1079,336 @@ document.getElementById("writeraw").onclick = async () => {
 
 /* boot is driven from the web-port wiring below */
 
-/* ===================== web-port boot wiring (runs last) ===================== */
-(function () {
+/* ============================================================================
+   ENHANCEMENTS (Web Editor Playbook) — searchable pickers, review-before-write,
+   safety rails, last-opened, boot progress, Web Share, save-in-place.
+   Layered on top of the reused desktop UI: it wraps render()/write() and
+   delegates events, rather than rewriting the UI.
+   ============================================================================ */
+
+let HANDLES = {};                                  // MEMFS path -> FileSystemFileHandle
+const escapeHtml = s => String(s).replace(/[&<>"]/g,
+  c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+const nameFor = path => (LOADED.find(x => x.path === path) || {}).name || "UserData.dat";
+const canShareFiles = () => {
+  try {
+    return !!navigator.canShare &&
+      navigator.canShare({ files: [new File([new Uint8Array([0])], "t.dat",
+        { type: "application/octet-stream" })] });
+  } catch (e) { return false; }
+};
+
+/* ---- staged boot progress ---- */
+function bootProgress(pct, msg) {
+  const el = document.getElementById("engineStatus");
+  if (!el) return;
+  el.innerHTML =
+    `<div class="bootbar"><div class="bootfill" style="width:${pct}%"></div></div>` +
+    `<div class="bootmsg spin">${escapeHtml(msg)}</div>`;
+}
+
+/* ---- IndexedDB kv (last-opened save) ---- */
+const IDB_DB = "ec-save-editor", IDB_STORE = "kv", LAST_KEY = "lastOpened";
+function idbOpen() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(IDB_DB, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore(IDB_STORE);
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function idbSet(k, v) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    tx.objectStore(IDB_STORE).put(v, k);
+    tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error);
+  });
+}
+async function idbGet(k) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(IDB_STORE, "readonly");
+    const rq = tx.objectStore(IDB_STORE).get(k);
+    rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error);
+  });
+}
+async function idbDel(k) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    tx.objectStore(IDB_STORE).delete(k);
+    tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error);
+  });
+}
+async function rememberLastOpened(name, bytes) {
+  await idbSet(LAST_KEY, { name, bytes, at: Date.now() });
+  refreshLastOpenedChip().catch(() => {});
+}
+async function refreshLastOpenedChip() {
+  const host = document.getElementById("lastOpened");
+  if (!host) return;
+  let rec = null;
+  try { rec = await idbGet(LAST_KEY); } catch (e) {}
+  if (!rec) { host.innerHTML = ""; return; }
+  host.innerHTML =
+    `<button class="chip" id="reopenBtn" type="button" title="Reopen last save">↻ ${escapeHtml(rec.name)}</button>` +
+    `<button class="chip xchip" id="forgetBtn" type="button" title="Forget last save">✕</button>`;
+  document.getElementById("reopenBtn").onclick = () =>
+    handleFile(new File([rec.bytes], rec.name, { type: "application/octet-stream" }), null, false);
+  document.getElementById("forgetBtn").onclick = async () => { await idbDel(LAST_KEY); refreshLastOpenedChip(); };
+}
+
+/* ---- generic modal / sheet ---- */
+function closeModal() { const b = document.getElementById("modalBackdrop"); if (b) b.remove(); }
+function openModal({ title, bodyHTML, bodyNode, actions }) {
+  closeModal();
+  const back = document.createElement("div");
+  back.className = "modal-backdrop"; back.id = "modalBackdrop";
+  const sheet = document.createElement("div"); sheet.className = "sheet";
+  sheet.innerHTML =
+    `<div class="sheet-head"><h3>${escapeHtml(title)}</h3>` +
+    `<button class="sheet-x" type="button" aria-label="Close">✕</button></div>` +
+    `<div class="sheet-body"></div><div class="sheet-actions"></div>`;
+  const body = sheet.querySelector(".sheet-body");
+  if (bodyNode) body.appendChild(bodyNode); else body.innerHTML = bodyHTML || "";
+  const actEl = sheet.querySelector(".sheet-actions");
+  (actions || []).forEach(a => {
+    const b = document.createElement("button");
+    b.textContent = a.label; if (a.ghost) b.className = "ghost";
+    b.onclick = a.onClick; actEl.appendChild(b);
+  });
+  back.appendChild(sheet); document.body.appendChild(back);
+  const close = () => { back.remove(); document.removeEventListener("keydown", esc); };
+  const esc = e => { if (e.key === "Escape") close(); };
+  document.addEventListener("keydown", esc);
+  sheet.querySelector(".sheet-x").onclick = close;
+  back.addEventListener("click", e => { if (e.target === back) close(); });
+  return { close, sheet, body };
+}
+
+/* ---- searchable id/name picker (replaces the native <datalist>) ---- */
+function pickerListFor(listId) {
+  if (!cat || !listId) return [];
+  if (listId === "dl_rune") return cat.runes;
+  if (listId === "dl_item") return cat.items;
+  if (listId.startsWith("dl_equip")) return cat.equipBySlot[listId.slice(8)] || [];
+  if (listId.startsWith("dl_cat_")) {
+    const s = listId.slice(7);
+    return cat.items.filter(o => slug(o.category || "") === s);
+  }
+  return [];
+}
+function openPicker(title, list, currentId, onPick) {
+  const wrap = document.createElement("div");
+  wrap.innerHTML =
+    `<input class="pickersearch" type="search" placeholder="type a name or id…" autocomplete="off">` +
+    `<div class="pickerlist"></div><div class="pickerhint hint"></div>`;
+  const search = wrap.querySelector(".pickersearch");
+  const listEl = wrap.querySelector(".pickerlist");
+  const hint = wrap.querySelector(".pickerhint");
+  const CAP = 300;
+  const draw = () => {
+    const q = search.value.trim().toLowerCase();
+    let rows = list;
+    if (q) rows = list.filter(o =>
+      String(o.id) === q || String(o.id).includes(q) || (o.name || "").toLowerCase().includes(q));
+    hint.textContent = rows.length > CAP
+      ? `showing ${CAP} of ${rows.length} — keep typing to narrow`
+      : `${rows.length} match${rows.length === 1 ? "" : "es"}`;
+    listEl.innerHTML = rows.slice(0, CAP).map(o =>
+      `<div class="pickrow${o.id === currentId ? " cur" : ""}" data-id="${o.id}">` +
+      `<span class="pid">${o.id}</span><span class="pname">${escapeHtml(o.name || "")}</span>` +
+      (o.category ? `<span class="pcat">${escapeHtml(o.category)}</span>` : "") + `</div>`).join("");
+  };
+  const m = openModal({ title, bodyNode: wrap, actions: [{ label: "Cancel", ghost: true, onClick: () => m.close() }] });
+  listEl.addEventListener("click", e => {
+    const row = e.target.closest(".pickrow"); if (!row) return;
+    onPick(parseInt(row.dataset.id, 10)); m.close();
+  });
+  search.addEventListener("input", draw);
+  draw(); setTimeout(() => search.focus(), 30);
+}
+function markPickInputs() {
+  document.querySelectorAll("#editor input.pick").forEach(el => { el.readOnly = true; });
+}
+function wireGlobalPickerDelegation() {
+  document.addEventListener("click", e => {
+    const el = e.target.closest && e.target.closest("#editor input.pick");
+    if (!el) return;
+    const listId = el.getAttribute("list");
+    if (!listId) return;
+    e.preventDefault();
+    el.readOnly = true; el.blur();
+    openPicker("Choose", pickerListFor(listId), idFromLabel(el.value), id => {
+      el.value = labelFor(id);
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  });
+}
+
+/* ---- review-before-write (generic old -> new diff) ---- */
+const STAT_LABEL = { _exp: "EXP", _hp: "HP", _mp: "MP", _weaponLevel: "Weapon Lv" };
+const ITEMKEY_LABEL = { _count: "Count", _max: "Max", _id: "Item" };
+function unitLabel(i) {
+  const u = data && data.summary.units[i];
+  return u ? (u.name || ("Unit " + u.id)) : ("Unit " + i);
+}
+function describeField(el) {
+  const d = el.dataset;
+  if (el.id === "f_money") return "Money";
+  if (el.id === "f_seconds") return "Playtime (seconds)";
+  if (el.id === "f_lap") return "New Game+ count";
+  if (el.id === "f_town") return "Fortress town level";
+  if (el.id === "f_pop") return "Population";
+  if (el.id === "f_diff") return "Difficulty";
+  if (d.df !== undefined) { const l = el.closest("label"); return l ? l.textContent.trim() : d.df; }
+  if (d.u !== undefined) {
+    if (d.k) return unitLabel(d.u) + " · " + (STAT_LABEL[d.k] || d.k);
+    if (d.eq !== undefined) return unitLabel(d.u) + " · " + ((cat.equipSlotLabels || [])[+d.eq] || ("Equip " + d.eq));
+    if (d.rune !== undefined) return unitLabel(d.u) + " · Rune " + (+d.rune + 1);
+  }
+  if (d.i !== undefined) return "Item row " + (+d.i + 1) + " · " + (ITEMKEY_LABEL[d.k] || d.k);
+  const lab = el.closest("div") && el.closest("div").querySelector("label");
+  return lab ? lab.textContent.trim() : (el.id || "field");
+}
+function fmtVal(el, raw) {
+  if (el.type === "checkbox") return raw === "true" ? "On" : "Off";
+  if (el.tagName === "SELECT") {
+    const o = el.querySelector(`option[value="${(window.CSS && CSS.escape) ? CSS.escape(raw) : raw}"]`);
+    return o ? o.textContent.trim() : raw;
+  }
+  return raw === "" ? "(empty)" : raw;
+}
+function hasUnsaved() {
+  if (!cur) return false;
+  const rosterN = document.querySelectorAll("#editor .rost.changed").length;
+  return (document.querySelectorAll("#editor .dirty").length
+    + pendingRemove.size + pendingAdd.length + rosterN + pendingUnlock.size) > 0;
+}
+function buildReview() {
+  const out = [];
+  document.querySelectorAll("#editor .dirty").forEach(el => {
+    const oldv = fmtVal(el, el.dataset.orig), newv = fmtVal(el, valOf(el));
+    if (oldv === newv) return;
+    out.push({ label: describeField(el), old: oldv, new: newv });
+  });
+  document.querySelectorAll("#editor .rost.changed").forEach(el => {
+    const nm = (el.querySelector(".name") || {}).textContent || "character";
+    const have = el.classList.contains("have");
+    out.push({ label: "Recruit · " + nm.trim(), old: have ? "not recruited" : "recruited",
+               new: have ? "recruited" : "not recruited" });
+  });
+  pendingUnlock.forEach(k => {
+    const [i, slot] = k.split(":");
+    out.push({ label: unitLabel(i) + " · Rune " + (+slot + 1), old: "locked", new: "unlocked" });
+  });
+  [...pendingRemove].forEach(i => out.push({ label: "Item row " + (+i + 1), old: "present", new: "removed" }));
+  pendingAdd.forEach(a => out.push({ label: "Add item", old: "—", new: labelFor(a._id) + " ×" + a._count }));
+  return out;
+}
+
+/* Reassigned reused write(): show a review, then write to the chosen destination. */
+write = async function () {
+  if (!cur) return;
+  const entries = buildReview();
+  const msg = document.getElementById("msg");
+  if (!entries.length) { if (msg) { msg.className = ""; msg.textContent = "No changes to write."; } return; }
+  const rows = entries.map(e =>
+    `<div class="reviewrow"><div class="rlabel">${escapeHtml(e.label)}</div>` +
+    `<div class="rval"><span class="rold">${escapeHtml(String(e.old))}</span>` +
+    `<span class="rarrow">→</span><span class="rnew">${escapeHtml(String(e.new))}</span></div></div>`).join("");
+  const actions = [{ label: "Cancel", ghost: true, onClick: () => closeModal() }];
+  if (HANDLES[cur]) actions.push({ label: "Apply & save to file", onClick: () => doWrite("file") });
+  if (canShareFiles()) actions.push({ label: "Apply & share…", onClick: () => doWrite("share") });
+  actions.push({ label: "Apply & download", onClick: () => doWrite("download") });
+  openModal({ title: `Review ${entries.length} change${entries.length > 1 ? "s" : ""}`,
+              bodyHTML: `<div class="reviewlist">${rows}</div>`, actions });
+};
+
+async function writeToHandle(path) {
+  const h = HANDLES[path];
+  if (!h) throw new Error("no writable file handle");
+  if ((await h.queryPermission({ mode: "readwrite" })) !== "granted")
+    if ((await h.requestPermission({ mode: "readwrite" })) !== "granted")
+      throw new Error("write permission denied");
+  const w = await h.createWritable();
+  await w.write(PY.FS.readFile(path));
+  await w.close();
+}
+
+async function doWrite(mode) {
+  closeModal();
+  const edits = collect();
+  let msg = document.getElementById("msg");
+  const setMsg = (cls, txt) => { const m = document.getElementById("msg"); if (m) { m.className = cls; m.textContent = txt; } };
+  try {
+    if (mode === "share") {
+      // Stay synchronous up to navigator.share() so the click's user-activation survives
+      // the (blocking) encrypt — no await before the share() call.
+      if (msg) { msg.className = "spin"; msg.textContent = "preparing share…"; }
+      const res = JSON.parse(pyCall("api_write", cur, JSON.stringify(edits)));
+      if (res.error) throw new Error(res.error);
+      const file = new File([PY.FS.readFile(cur)], nameFor(cur), { type: "application/octet-stream" });
+      const p = navigator.share({ files: [file], title: nameFor(cur) });
+      await p;
+      await open(cur); loadSlots();
+      setMsg("ok", `shared ${res.bytes} bytes · ${res.changed} changed`);
+      return;
+    }
+    if (msg) { msg.className = "spin"; msg.textContent = "encrypting + verifying…"; }
+    const res = await api("/api/write", { method: "POST", body: JSON.stringify({ path: cur, edits }) });
+    if (res.error) { setMsg("err", res.error); return; }
+    if (mode === "file") await writeToHandle(cur); else downloadSave(cur);
+    await open(cur); loadSlots();
+    setMsg("ok", `wrote ${res.bytes} bytes · ${res.changed} changed` +
+      (mode === "file" ? " · saved to file" : " · downloaded"));
+  } catch (e) {
+    if (e && e.name === "AbortError") { setMsg("", "share cancelled"); return; }
+    setMsg("err", e.message || String(e));
+  }
+}
+
+/* Wrap render() so pickers are (re)marked after every (re)render. */
+const _origRender = render;
+render = function () { _origRender(); try { markPickInputs(); } catch (e) {} };
+
+/* Re-wire the Raw JSON write button (the api() shim no longer auto-downloads). */
+{
+  const rawBtn = document.getElementById("writeraw");
+  if (rawBtn) rawBtn.onclick = async () => {
+    if (!cur) return alert("Open a save first.");
+    let obj;
+    try { obj = JSON.parse(document.getElementById("rawbox").value); }
+    catch (e) { return alert("Invalid JSON: " + e.message); }
+    const res = await api("/api/writeraw", { method: "POST", body: JSON.stringify({ path: cur, json: obj }) });
+    if (res.error) return alert("Error: " + res.error);
+    downloadSave(cur);
+    alert(`Wrote ${res.bytes} bytes (downloaded).`);
+    open(cur);
+  };
+}
+
+/* ---- ingest funnel: FS Access picker (desktop) or <input>, drag-drop ---- */
+function wireIngest() {
   const drop = document.getElementById("drop");
   const fileInput = document.getElementById("file");
   const pickBtn = document.getElementById("pickBtn");
-
-  pickBtn.onclick = () => fileInput.click();
+  const useFSA = "showOpenFilePicker" in window;
+  pickBtn.onclick = async () => {
+    if (useFSA) {
+      try {
+        const [handle] = await window.showOpenFilePicker({
+          types: [{ description: "Eiyuden save", accept: { "application/octet-stream": [".dat"] } }],
+        });
+        handleFile(await handle.getFile(), handle);
+        return;
+      } catch (e) { if (e && e.name === "AbortError") return; /* else fall through */ }
+    }
+    fileInput.click();
+  };
   fileInput.onchange = () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); };
-
   ["dragenter", "dragover"].forEach(ev =>
     drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("hot"); }));
   ["dragleave", "drop"].forEach(ev =>
@@ -1088,7 +1417,35 @@ document.getElementById("writeraw").onclick = async () => {
     const f = e.dataTransfer.files && e.dataTransfer.files[0];
     if (f) handleFile(f);
   });
+}
 
+function wireUnsavedGuard() {
+  window.addEventListener("beforeunload", e => {
+    if (hasUnsaved()) { e.preventDefault(); e.returnValue = ""; }
+  });
+}
+
+/* A save shared into the installed PWA (see sw.js + manifest share_target). */
+async function maybeConsumeSharedFile() {
+  if (!new URLSearchParams(location.search).has("shared")) return;
+  try {
+    const cache = await caches.open("ec-share");
+    const resp = await cache.match("shared-file");
+    if (resp) {
+      const blob = await resp.blob();
+      const name = resp.headers.get("x-filename") || "UserData.dat";
+      await cache.delete("shared-file");
+      await handleFile(new File([blob], name));
+    }
+  } catch (e) { console.warn("shared-file intake failed", e); }
+  history.replaceState({}, "", location.pathname);
+}
+
+/* ===================== web-port boot wiring (runs last) ===================== */
+(function () {
+  wireIngest();                    // pick (FS Access or <input>), drag-drop, last-opened chip
+  wireGlobalPickerDelegation();    // tap an id-field -> searchable modal picker
+  wireUnsavedGuard();              // beforeunload warning while there are pending edits
   pyReady = bootPyodide();
   boot();
   registerPWA();

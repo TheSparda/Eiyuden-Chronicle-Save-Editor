@@ -284,3 +284,99 @@ textarea:focus{outline:none;border-color:var(--gold)}
 .drop.hot{border-color:var(--gold-hi);background:rgba(217,180,73,.12)}
 .drop .filebtn{display:inline-block}
 .drop button{padding:7px 14px}
+
+/* ============================================================================
+   Web Editor Playbook enhancements — mobile-first, modals, pickers, review
+   ============================================================================ */
+
+/* Safe-area (notch/rounded corners) — index.html sets viewport-fit=cover */
+body{padding:env(safe-area-inset-top) env(safe-area-inset-right)
+     env(safe-area-inset-bottom) env(safe-area-inset-left)}
+
+/* Horizontal-scroll tab strip instead of wrapping */
+.tabs{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:thin}
+.tab{white-space:nowrap;flex:0 0 auto}
+
+/* Sticky action toolbar with safe-area padding at the very bottom */
+.bar{padding-bottom:calc(12px + env(safe-area-inset-bottom))}
+
+/* Last-opened chip + generic chips */
+.lastopened{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.chip{padding:5px 12px;border-radius:99px;font-size:12px;font-weight:600;cursor:pointer;
+  color:var(--gold-hi);border:1px solid var(--gold-dim);
+  background:rgba(217,180,73,.12);box-shadow:none;letter-spacing:.02em}
+.chip:hover{background:var(--gold);color:#2a1b04}
+.chip.xchip{padding:5px 10px;color:var(--muted)}
+.chip.xchip:hover{color:var(--err);border-color:var(--err);background:rgba(200,80,63,.14)}
+
+/* Staged boot progress bar */
+.bootbar{height:6px;border-radius:99px;background:rgba(0,0,0,.35);overflow:hidden;
+  border:1px solid var(--line);margin-bottom:6px}
+.bootfill{height:100%;background:linear-gradient(90deg,var(--gold-dim),var(--gold-hi));
+  transition:width .3s ease}
+.bootmsg{font-size:12px}
+
+/* Modal / bottom-sheet */
+.modal-backdrop{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.62);
+  display:flex;align-items:flex-end;justify-content:center;
+  padding:0;animation:fade .12s ease}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+.sheet{width:100%;max-height:88vh;display:flex;flex-direction:column;
+  background:linear-gradient(180deg,#33230c 0%,var(--panel) 100%);
+  border:1px solid var(--line2);border-bottom:none;border-radius:12px 12px 0 0;
+  box-shadow:0 -6px 30px rgba(0,0,0,.6)}
+.sheet-head{display:flex;align-items:center;gap:10px;padding:12px 16px;
+  border-bottom:1px solid var(--line)}
+.sheet-head h3{margin:0;font-size:13px;color:var(--gold)!important}
+.sheet-x{margin-left:auto;width:28px;height:28px;padding:0;border-radius:50%;
+  background:rgba(217,180,73,.12);color:var(--gold-hi);border:1px solid var(--gold-dim);
+  box-shadow:none;font-size:13px;line-height:1}
+.sheet-x:hover{background:var(--gold);color:#2a1b04}
+.sheet-body{padding:14px 16px;overflow:auto;flex:1;min-height:0}
+.sheet-actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;
+  padding:12px 16px;border-top:1px solid var(--line);
+  padding-bottom:calc(12px + env(safe-area-inset-bottom))}
+.sheet-actions button{flex:1 1 auto;min-width:120px}
+
+/* Searchable picker */
+.pickersearch{margin-bottom:10px}
+.pickerlist{display:flex;flex-direction:column;gap:2px}
+.pickrow{display:flex;align-items:baseline;gap:10px;padding:8px 10px;border-radius:5px;
+  cursor:pointer;border:1px solid transparent}
+.pickrow:hover{background:rgba(217,180,73,.10);border-color:var(--line)}
+.pickrow.cur{background:rgba(217,180,73,.16);border-color:var(--gold-dim)}
+.pickrow .pid{color:var(--muted);font-variant-numeric:tabular-nums;font-size:12px;
+  min-width:52px;flex:0 0 auto}
+.pickrow .pname{font-weight:600;flex:1;min-width:0}
+.pickrow .pcat{color:var(--muted);font-size:11px;flex:0 0 auto}
+.pickerhint{margin-top:8px}
+
+/* Review-changes list */
+.reviewlist{display:flex;flex-direction:column;gap:6px}
+.reviewrow{display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-radius:5px;
+  background:rgba(0,0,0,.16);border:1px solid var(--line)}
+.reviewrow .rlabel{font-size:11px;color:var(--muted);text-transform:uppercase;
+  letter-spacing:.06em}
+.reviewrow .rval{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.rold{color:var(--muted);text-decoration:line-through}
+.rarrow{color:var(--gold-dim)}
+.rnew{color:var(--gold-hi);font-weight:600}
+
+/* Mobile: stack the sidebar under the editor, kill fixed widths */
+@media (max-width:760px){
+  .wrap{flex-direction:column;padding:10px;gap:10px}
+  .side{width:auto;flex:1 1 auto;order:2}
+  .main{order:1;width:100%}
+  header{padding:12px 14px}
+  h1{font-size:16px}
+}
+
+/* Larger screens: modal is a centered card, not a bottom sheet */
+@media (min-width:600px){
+  .modal-backdrop{align-items:center;padding:20px}
+  .sheet{max-width:640px;border-radius:12px;border-bottom:1px solid var(--line2)}
+}
+
+/* Sticky toolbar must wrap on narrow screens, and the status text must break */
+.bar{flex-wrap:wrap;row-gap:8px}
+.bar #msg{overflow-wrap:anywhere;min-width:0}

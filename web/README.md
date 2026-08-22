@@ -72,6 +72,37 @@ Your original file is never modified — you always download a copy.
 
 iOS Safari has no install prompt — use *Share → Add to Home Screen*.
 
+## Enhancements (Web Editor Playbook)
+
+Beyond the core Pyodide bridge, the editor implements the applicable parts of the
+cross-editor playbook (the ISO-editor half doesn't apply — Eiyuden saves are small
+TripleDES-JSON files, not a multi-GB disc):
+
+- **Mobile-first** — safe-area insets, a sidebar that stacks under the editor on phones,
+  a horizontal-scroll tab strip, a wrapping sticky Save toolbar, full-width modal sheets,
+  and **verified zero horizontal overflow at 320/360px**.
+- **Searchable pickers** — every id-based field (equipment, runes, items) opens a
+  type-to-filter modal (id · name · category) instead of a native dropdown — the big
+  usability win with 1,142 items.
+- **Review before write** — an explicit old→new list of *effective* changes is shown and
+  must be confirmed before anything is written; the confirm action names the destination.
+- **Safety & convenience** — a `beforeunload` guard while edits are pending, last-opened
+  save remembered in **IndexedDB** with a one-tap **↻** chip, and staged boot progress.
+- **PWA sharing & save-in-place** — Web Share **in** (a save shared into the installed PWA
+  via `share_target`) and **out** (`navigator.share`), plus File System Access
+  **save-in-place** on desktop Chromium — each feature-detected, with graceful fallback to
+  plain download when unavailable.
+
+### Tests (`web/tests/`, `npm test`)
+
+- `validate.mjs` — static: every JS file parses, the shell is wired, manifest/SW/CSS carry
+  the playbook features.
+- `save_roundtrip.py` (+ `save-roundtrip.mjs` wrapper) — imports the **real** engine, builds
+  a synthetic encrypted save, and drives the exact in-app glue through
+  decode→edit→write→re-decode. The wrapper skips cleanly if `python3` is absent.
+- `e2e.mjs` — headless Chromium (playwright-core): boot, decode, picker, review modal, and
+  the 320/360px no-overflow check. Self-skips if Playwright/Chromium or network is absent.
+
 ## A note on speed
 
 Pure-Python 3DES in WebAssembly is correct but not fast: decrypting or writing a large
