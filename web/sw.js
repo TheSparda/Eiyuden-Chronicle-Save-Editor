@@ -3,7 +3,7 @@
      cached fallback when offline).
    - The large, version-pinned Pyodide CDN assets are cache-first (download once).
    Bump CACHE to force clients to drop old caches after a deploy. */
-const CACHE = "ec-save-editor-v2";
+const CACHE = "ec-save-editor-v3";
 const SHELL = [
   "./", "./index.html", "./style.css", "./app.js", "./manifest.webmanifest",
   "./icons/icon-192.png", "./icons/icon-512.png", "./icons/icon-maskable-512.png",

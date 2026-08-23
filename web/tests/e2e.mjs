@@ -85,6 +85,26 @@ try {
   ok((await page.$(".modal-backdrop .reviewlist")) !== null, "review-changes modal appears");
   const rl = await page.textContent(".reviewlist");
   ok(rl != null && rl.includes("999999"), "review shows the new value");
+  await page.keyboard.press("Escape");
+
+  // v2: Reference tab renders rows without a save dependency
+  await page.evaluate(() => showTab("ref2"));
+  await page.waitForSelector("#ref2table tbody tr", { timeout: 10000 });
+  ok((await page.$$("#ref2table tbody tr")).length > 0, "Reference tab renders rows");
+
+  // v2: 'Max weapon level' preset stages an edit, and undo reverts it
+  const preset = await page.evaluate(() => {
+    showTab("chars");
+    const el = document.querySelector('#sp-chars input[data-k="_weaponLevel"]');
+    if (!el) return { skip: true };
+    const before = el.value;
+    document.querySelector('.preset[data-preset="weapon"]').click();
+    const after = el.value;
+    if (typeof undo === "function") undo();
+    return { skip: false, before, after, reverted: el.value };
+  });
+  ok(preset.skip || preset.after !== preset.before, "preset stages a weapon-level edit");
+  ok(preset.skip || preset.reverted === preset.before, "undo reverts the preset edit");
 } finally {
   if (browser) await browser.close();
   server.close();

@@ -380,3 +380,24 @@ body{padding:env(safe-area-inset-top) env(safe-area-inset-right)
 /* Sticky toolbar must wrap on narrow screens, and the status text must break */
 .bar{flex-wrap:wrap;row-gap:8px}
 .bar #msg{overflow-wrap:anywhere;min-width:0}
+
+/* ============================================================================
+   v2 depth — field notes, presets, undo/redo, Reference tab
+   ============================================================================ */
+.fnote{display:block;font-size:10px;color:var(--muted);margin-top:2px;
+  font-style:italic;letter-spacing:.01em;opacity:.9;overflow-wrap:anywhere}
+
+.presets{display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  padding:10px 12px;margin-bottom:12px;border:1px solid var(--line);border-radius:6px;
+  background:linear-gradient(180deg,rgba(217,180,73,.07),rgba(0,0,0,.16))}
+.presets .preslabel{font-family:Georgia,serif;text-transform:uppercase;letter-spacing:.1em;
+  font-size:11px;color:var(--gold);font-weight:700}
+.presets .preset{padding:5px 12px;font-size:12px}
+.presets .undoredo{margin-left:auto;display:flex;gap:6px}
+.presets .chip:disabled{opacity:.4;cursor:default}
+
+.refbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+.refbar input[type=search]{flex:1;min-width:160px}
+.refbar select{width:auto;min-width:110px}
+#ref2table th{position:sticky;top:0;background:#2a1c09;z-index:1}
+#pane-ref2 .tablewrap{max-height:70vh;overflow:auto}

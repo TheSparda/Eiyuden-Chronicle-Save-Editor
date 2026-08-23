@@ -81,6 +81,15 @@ check(after["_unitData"]["_units"][0]["_equipment"][0] == 6011, "equipment persi
 check(after["_inventory"]["_items"][0]["_count"] == 77, "item count persisted")
 check(len(after["_inventory"]["_items"]) == 2, "addItems appended a stack")
 
+# v2: unit reference glue (Reference tab + inline notes)
+uref = json.loads(glue["api_unitref"]())
+check(isinstance(uref, list) and len(uref) > 0, f"api_unitref returns units ({len(uref)})")
+sample_unit = next((u for u in uref if u.get("samples")), None)
+check(sample_unit is not None and len(sample_unit["samples"][0]) == 4,
+      "unit ref carries (exp,hp,mp,wl) stat samples")
+check(all(("id" in u and "runeHoles" in u and "role" in u) for u in uref),
+      "unit ref rows have id/role/runeHoles")
+
 # unrecognized input is rejected
 bad = os.path.join(os.path.dirname(path), "garbage.dat")
 open(bad, "wb").write(b"not a real save")

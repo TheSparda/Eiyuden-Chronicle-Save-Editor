@@ -4,6 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#150e05">
+  <meta name="app-version" content="1.1.0">
+
   <meta name="description" content="Edit Eiyuden Chronicle: Hundred Heroes saves entirely on your device. Nothing is uploaded.">
   <title>Eiyuden Chronicle Save Editor (Web)</title>
   <link rel="stylesheet" href="style.css">
@@ -62,6 +64,7 @@
         <div class="tab" data-t="roster">Recruit</div>
         <div class="tab" data-t="inv">Inventory</div>
         <div class="tab" data-t="raw">Raw JSON</div>
+        <div class="tab" data-t="ref2">Reference</div>
       </div>
       <div id="pane-edit">
         <div class="body" id="editor"><span class="sub">Open a save file to begin.</span></div>
@@ -74,8 +77,18 @@
           <div style="margin-top:10px"><button id="writeraw">Write raw JSON</button></div>
         </div>
       </div>
+      <div id="pane-ref2" style="display:none">
+        <div class="note">Read-only reference from the game's own data — no save needed.
+          Useful for looking up ids, names, categories, caps, roles and rune-hole counts.</div>
+        <div class="body" id="ref2body"><span class="sub">Loading reference…</span></div>
+      </div>
     </div>
   </div>
+</div>
+
+<div id="updateBanner" class="banner info hidden" style="margin:0 16px 12px">
+  <b>Update available.</b> A newer version is deployed.
+  <button id="updateBtn" class="chip" type="button" style="margin-left:8px">↻ Update now</button>
 </div>
 
 <footer class="madeby">
@@ -83,6 +96,8 @@
   · <a href="https://github.com/TheSparda/Eiyuden-Chronicle-Save-Editor" target="_blank"
         rel="noopener">source on GitHub</a>
   · runs 100% in your browser
+  · <span id="appver">v?</span>
+  · <button id="forceRefresh" class="chip" type="button" title="Unregister the service worker, clear caches, reload">↻ Force refresh</button>
 </footer>
 
 <script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>

@@ -66,6 +66,22 @@ def _cloud():
 def api_catalog():
     return json.dumps(ecsave.catalog())
 
+def api_unitref():
+    # Per-unit reference for inline notes + the read-only Reference tab. Samples are
+    # (exp, hp, mp, weaponLevel); hp/mp are OBSERVED current values (see ecsave), not maxes.
+    ids = set(ecsave.UNIT_NAMES) | set(ecsave.UNIT_STATS) \
+        | set(ecsave.UNIT_ROLES) | set(ecsave.UNIT_RUNE_HOLES)
+    out = []
+    for uid in sorted(ids):
+        out.append({
+            "id": uid,
+            "name": ecsave.unit_name(uid),
+            "role": (ecsave.UNIT_ROLES.get(uid) or {}).get("unitType"),
+            "runeHoles": ecsave.UNIT_RUNE_HOLES.get(uid),
+            "samples": [list(s) for s in (ecsave.UNIT_STATS.get(uid) or [])],
+        })
+    return json.dumps(out)
+
 def api_cloud():
     return json.dumps(_cloud())
 
@@ -177,6 +193,7 @@ async function api(u, opt) {
   const body = opt.body ? JSON.parse(opt.body) : null;
 
   if (p === "/api/catalog") return JSON.parse(pyCall("api_catalog"));
+  if (p === "/api/unitref") return JSON.parse(pyCall("api_unitref"));
   if (p === "/api/cloud")   return JSON.parse(pyCall("api_cloud"));
   if (p === "/api/saves")   return JSON.parse(pyCall("api_saves", JSON.stringify(LOADED)));
 
@@ -244,8 +261,11 @@ async function boot() {
   try {
     await pyReady;
     cat = await api("/api/catalog");
+    UNITREF = await api("/api/unitref");     // per-unit reference (roles, rune holes, stat curves)
     buildNameMap();
     buildDatalists();
+    buildUnitRefMap();
+    buildReferenceTab();                     // read-only Reference tab (works without a save)
     document.getElementById("hdr").textContent =
       `${cat.items.length} items · ${cat.equipment.length} equipment · ${cat.runes.length} runes`;
     engineStatus.innerHTML = '<span class="ok">Engine ready — open a save file.</span>';
@@ -1441,11 +1461,254 @@ async function maybeConsumeSharedFile() {
   history.replaceState({}, "", location.pathname);
 }
 
+/* ============================================================================
+   DEPTH (Web Editor Playbook v2) — reference enrichment + read-only Reference tab,
+   presets, undo/redo over staged edits, and the PWA staleness escape hatch.
+   Applicable subset only: Eiyuden saves are self-describing JSON (no reconstructed
+   byte offsets, no ISO, no committed guide text), so B12/B14/patch-synthesis don't
+   apply. Enrichment uses the game-extracted reference data we already ship.
+   ============================================================================ */
+
+let UNITREF = [];            // [{id,name,role,runeHoles,samples:[[exp,hp,mp,wl]...]}]
+let UNITREF_BY = {};         // id -> ref
+function buildUnitRefMap() { UNITREF_BY = {}; for (const u of UNITREF) UNITREF_BY[u.id] = u; }
+
+/* Observed stat sample nearest a unit's current EXP. NOTE: hp/mp are observed current
+   values (battle-damaged), not maxes — surfaced as context, never asserted/written. */
+function nearestSample(unitId, exp) {
+  const r = UNITREF_BY[unitId];
+  if (!r || !r.samples || !r.samples.length) return null;
+  let best = null, bd = Infinity;
+  for (const s of r.samples) { const d = Math.abs(s[0] - (exp || 0)); if (d < bd) { bd = d; best = s; } }
+  return best;               // [exp, hp, mp, weaponLevel]
+}
+function maxWeaponLevel(unitId) {
+  const r = UNITREF_BY[unitId];
+  if (!r || !r.samples || !r.samples.length) return null;
+  return Math.max.apply(null, r.samples.map(s => s[3]));
+}
+
+/* B13 — inline faded notes under fields, from the reference data. Runs after each render. */
+function decorateV2() {
+  if (!data) return;
+  const note = (el, txt) => {
+    if (!el) return;
+    const cell = el.closest("td") || el.parentElement;
+    if (!cell || cell.querySelector(".fnote")) return;
+    const n = document.createElement("div"); n.className = "fnote"; n.textContent = txt;
+    cell.appendChild(n);
+  };
+  const units = data.summary.units || [];
+  document.querySelectorAll('#sp-chars input[data-k="_hp"]').forEach(el => {
+    const u = units[+el.dataset.u]; if (!u) return; const s = nearestSample(u.id, u.exp);
+    if (s) note(el, `≈ ${s[1]} observed near this EXP`);
+  });
+  document.querySelectorAll('#sp-chars input[data-k="_mp"]').forEach(el => {
+    const u = units[+el.dataset.u]; if (!u) return; const s = nearestSample(u.id, u.exp);
+    if (s) note(el, `≈ ${s[2]} observed near this EXP`);
+  });
+  document.querySelectorAll('#sp-chars input[data-k="_weaponLevel"]').forEach(el => {
+    const u = units[+el.dataset.u]; if (!u) return; const m = maxWeaponLevel(u.id);
+    if (m != null) note(el, `max observed Lv ${m}`);
+  });
+  const items = data.summary.items || [];
+  document.querySelectorAll('#sp-inv input[data-k="_count"]').forEach(el => {
+    const it = items[+el.dataset.i]; if (!it || it.max == null) return;
+    note(el, `stack cap ${it.max}`);
+  });
+}
+
+/* B15 — read-only Reference tab (items + units), works without a save loaded. */
+function buildReferenceTab() {
+  const host = document.getElementById("ref2body");
+  if (!host || !cat) return;
+  host.innerHTML =
+    `<div class="refbar">
+       <input type="search" id="ref2search" placeholder="filter by id or name…">
+       <select id="ref2kind"><option value="items">Items</option><option value="units">Units</option></select>
+     </div>
+     <div class="refhint hint" id="ref2hint"></div>
+     <div class="tablewrap"><table id="ref2table"></table></div>`;
+  const search = host.querySelector("#ref2search"), kind = host.querySelector("#ref2kind");
+  const CAP = 400;
+  const draw = () => {
+    const q = search.value.trim().toLowerCase(), k = kind.value;
+    let head, rows;
+    const hit = o => !q || String(o.id).includes(q) || (o.name || "").toLowerCase().includes(q);
+    if (k === "items") {
+      head = ["Id", "Name", "Category", "Max"];
+      rows = (cat.items || []).filter(hit).map(o => [o.id, o.name, o.category || "", o.max != null ? o.max : ""]);
+    } else {
+      head = ["Id", "Name", "Role", "Rune holes"];
+      rows = UNITREF.filter(hit).map(o => [o.id, o.name || "", o.role || "", o.runeHoles != null ? o.runeHoles : ""]);
+    }
+    host.querySelector("#ref2hint").textContent =
+      rows.length > CAP ? `showing ${CAP} of ${rows.length}` : `${rows.length} rows`;
+    host.querySelector("#ref2table").innerHTML =
+      `<thead><tr>${head.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>` +
+      rows.slice(0, CAP).map(r => `<tr>${r.map(c => `<td>${escapeHtml(String(c))}</td>`).join("")}</tr>`).join("") +
+      `</tbody>`;
+  };
+  search.addEventListener("input", draw);
+  kind.addEventListener("change", draw);
+  draw();
+}
+
+/* B18 — presets that stage reviewable/undoable edits from the reference data. */
+function setFieldValue(el, val) {
+  el.value = String(val);
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+  el.dispatchEvent(new Event("change", { bubbles: true }));
+}
+function injectPresets() {
+  const host = document.getElementById("sp-meta");
+  if (!host || host.querySelector(".presets")) return;
+  const box = document.createElement("div");
+  box.className = "presets";
+  box.innerHTML =
+    `<span class="preslabel">Quick presets</span>
+     <button class="ghost preset" data-preset="money" type="button">Max money</button>
+     <button class="ghost preset" data-preset="stacks" type="button">Max item stacks</button>
+     <button class="ghost preset" data-preset="weapon" type="button">Max weapon level</button>
+     <span class="undoredo">
+       <button class="chip" id="undoBtn" type="button" title="Undo (Ctrl+Z)" disabled>↶ Undo</button>
+       <button class="chip" id="redoBtn" type="button" title="Redo (Ctrl+Y)" disabled>↷ Redo</button>
+     </span>`;
+  host.insertBefore(box, host.firstChild);
+  box.querySelectorAll(".preset").forEach(b => b.onclick = () => runPreset(b.dataset.preset));
+  document.getElementById("undoBtn").onclick = undo;
+  document.getElementById("redoBtn").onclick = redo;
+  updateHistButtons();
+}
+function runPreset(kind) {
+  beginHistGroup();
+  try {
+    if (kind === "money") {
+      const f = document.getElementById("f_money"); if (f) setFieldValue(f, 9999999);
+    } else if (kind === "stacks") {
+      (data.summary.items || []).forEach((it, i) => {
+        const el = document.querySelector(`#sp-inv input[data-i="${i}"][data-k="_count"]`);
+        if (el && it.max != null) setFieldValue(el, it.max);
+      });
+    } else if (kind === "weapon") {
+      (data.summary.units || []).forEach((u, i) => {
+        const el = document.querySelector(`#sp-chars input[data-u="${i}"][data-k="_weaponLevel"]`);
+        const m = maxWeaponLevel(u.id);
+        if (el && m != null) setFieldValue(el, m);
+      });
+    }
+  } finally { endHistGroup(); }
+  const msg = document.getElementById("msg");
+  if (msg) { msg.className = ""; msg.textContent = "preset staged — review it with Write save"; }
+}
+
+/* B18 — undo/redo over staged field edits. One user action (or preset) = one step. */
+let undoStack = [], redoStack = [], histSuppress = false, histGroup = null;
+function resetHistory() { undoStack = []; redoStack = []; histGroup = null; histSuppress = false; updateHistButtons(); }
+function beginHistGroup() { histGroup = []; }
+function endHistGroup() { if (histGroup && histGroup.length) { undoStack.push(histGroup); redoStack = []; } histGroup = null; updateHistButtons(); }
+function recordChange(el, from, to) {
+  if (histSuppress) return;
+  const step = { el, from, to };
+  if (histGroup) histGroup.push(step);
+  else { undoStack.push([step]); redoStack = []; }
+  if (undoStack.length > 200) undoStack.shift();
+  updateHistButtons();
+}
+function applyHist(el, val) {
+  histSuppress = true;
+  if (el.type === "checkbox") el.checked = (val === "true" || val === true);
+  else el.value = val;
+  el._ph = (el.type === "checkbox") ? String(el.checked) : el.value;
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+  el.dispatchEvent(new Event("change", { bubbles: true }));
+  histSuppress = false;
+}
+function undo() { if (!undoStack.length) return; const g = undoStack.pop(); for (let i = g.length - 1; i >= 0; i--) applyHist(g[i].el, g[i].from); redoStack.push(g); updateHistButtons(); }
+function redo() { if (!redoStack.length) return; const g = redoStack.pop(); for (const s of g) applyHist(s.el, s.to); undoStack.push(g); updateHistButtons(); }
+function updateHistButtons() {
+  const u = document.getElementById("undoBtn"), r = document.getElementById("redoBtn");
+  if (u) u.disabled = !undoStack.length;
+  if (r) r.disabled = !redoStack.length;
+}
+function wireHistory() {
+  document.addEventListener("change", e => {
+    const el = e.target;
+    if (!el.matches || !el.matches("#editor input, #editor select")) return;
+    if (el.dataset.orig === undefined) return;             // only decorated save-data fields
+    const cur = (el.type === "checkbox") ? String(el.checked) : el.value;
+    const from = (el._ph !== undefined) ? el._ph : el.dataset.orig;
+    if (from !== cur) recordChange(el, from, cur);
+    el._ph = cur;
+  }, true);
+  document.addEventListener("keydown", e => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    const k = e.key.toLowerCase();
+    if (k === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
+    else if (k === "y" || (k === "z" && e.shiftKey)) { e.preventDefault(); redo(); }
+  });
+}
+
+/* B17 — PWA staleness escape hatch: version-behind check + force refresh. */
+const APP_VERSION = (document.querySelector('meta[name="app-version"]') || {}).content || "?";
+async function versionBehindCheck() {
+  try {
+    const r = await fetch("index.html?cb=" + Date.now(), { cache: "no-store" });
+    if (!r.ok) return;
+    const m = (await r.text()).match(/name="app-version"\s+content="([^"]+)"/);
+    if (m && m[1] && m[1] !== APP_VERSION) {
+      const b = document.getElementById("updateBanner"); if (b) b.classList.remove("hidden");
+    }
+  } catch (e) { /* offline / SW-served — the Force refresh button is the fallback */ }
+}
+async function forceRefresh() {
+  try {
+    if ("serviceWorker" in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
+    }
+  } catch (e) {}
+  try { const ks = await caches.keys(); await Promise.all(ks.map(k => caches.delete(k))); } catch (e) {}
+  location.reload();
+}
+function wirePWAUpdate() {
+  const el = document.getElementById("appver"); if (el) el.textContent = "v" + APP_VERSION;
+  const fr = document.getElementById("forceRefresh"); if (fr) fr.onclick = forceRefresh;
+  const ub = document.getElementById("updateBtn"); if (ub) ub.onclick = forceRefresh;
+  versionBehindCheck();
+}
+
+/* Compose render() again so v2 notes + presets are (re)applied after every render. */
+const _renderV1 = render;
+render = function () { _renderV1(); try { decorateV2(); injectPresets(); } catch (e) { console.warn("v2 decorate", e); } };
+
+/* Reference tab in showTab(); reset undo history on open()/revertAll(). */
+const _origShowTab = showTab;
+showTab = function (name) {
+  const ref2 = document.getElementById("pane-ref2");
+  if (name === "ref2") {
+    document.querySelectorAll(".tab").forEach(x => x.classList.toggle("active", x.dataset.t === "ref2"));
+    document.getElementById("pane-edit").style.display = "none";
+    document.getElementById("pane-raw").style.display = "none";
+    if (ref2) ref2.style.display = "";
+    activeTab = "ref2";
+    return;
+  }
+  if (ref2) ref2.style.display = "none";
+  _origShowTab(name);
+};
+const _openV1 = open;
+open = async function (p, n) { resetHistory(); return _openV1(p, n); };
+const _revertAllV1 = revertAll;
+revertAll = function () { _revertAllV1(); resetHistory(); };
+
 /* ===================== web-port boot wiring (runs last) ===================== */
 (function () {
   wireIngest();                    // pick (FS Access or <input>), drag-drop, last-opened chip
   wireGlobalPickerDelegation();    // tap an id-field -> searchable modal picker
   wireUnsavedGuard();              // beforeunload warning while there are pending edits
+  wireHistory();                   // undo/redo over staged edits (Ctrl+Z / Ctrl+Y)
+  wirePWAUpdate();                 // version-behind check + force-refresh escape hatch
   pyReady = bootPyodide();
   boot();
   registerPWA();

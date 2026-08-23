@@ -57,7 +57,23 @@ for (const [needle, label] of [
   ["writeToHandle", "save-in-place writer"],
   ["beforeunload", "unsaved-changes guard"],
   ["canShareFiles", "share capability gating"],
+  // v2 depth
+  ["function buildReferenceTab", "read-only Reference tab"],
+  ["function decorateV2", "inline reference notes"],
+  ["function nearestSample", "stat-curve lookup"],
+  ["function runPreset", "presets"],
+  ["function undo", "undo/redo"],
+  ["function forceRefresh", "PWA force-refresh"],
+  ["versionBehindCheck", "version-behind check"],
+  ["api_unitref", "unit reference glue"],
 ]) ok(app.includes(needle), `app.js: ${label}`);
+
+// 6b) v2 shell wiring
+ok(/name="app-version"\s+content="[^"]+"/.test(html), "index.html carries an app-version meta");
+ok(html.includes('data-t="ref2"'), "index.html has the Reference tab");
+ok(html.includes('id="forceRefresh"'), "index.html has the Force-refresh button");
+ok(/\.fnote\{/.test(css), "css styles inline field notes");
+ok(/\.presets\{/.test(css), "css styles the presets bar");
 
 // 7) reference JSON tables the engine loads exist (fetched from ../editor/ at runtime)
 for (const j of ["ec_item_names.json", "ec_unit_names.json", "ec_equip_slots.json"])

@@ -93,6 +93,29 @@ TripleDES-JSON files, not a multi-GB disc):
   **save-in-place** on desktop Chromium — each feature-detected, with graceful fallback to
   plain download when unavailable.
 
+### Depth (v2)
+
+The applicable parts of the v2 "depth" playbook (much of v2 targets an ISO editor / external
+guide data that a JSON-save PC editor doesn't have, so those are intentionally omitted):
+
+- **Reference enrichment** — faded inline notes under fields from the game-extracted reference
+  data: observed HP/MP near a unit's current EXP (from the stat-sample curves — labelled
+  *observed*, not a max, since those samples are current values), max observed weapon level, and
+  item stack caps.
+- **Read-only Reference tab** — a searchable Items (id · name · category · max) and Units
+  (id · name · role · rune-holes) reference, usable without a save loaded.
+- **Presets** — Max money, Max item stacks (each item's real cap), Max weapon level. Each stages
+  a normal reviewable/revertible/undoable edit, then flows through the review-before-write.
+- **Undo/redo** — over staged field edits (Ctrl+Z / Ctrl+Y), one preset = one step, on top of
+  the existing per-field ↺ and Revert-all.
+- **PWA staleness escape hatch** — a footer version, a cache-busted version-behind check, and a
+  permanent **↻ Force refresh** (unregister SW, clear caches, reload) for when a stale service
+  worker pins an old build.
+
+*Not applicable here (and not faked):* raw-offset verification and sibling-table description
+derivation (saves are self-describing JSON — no reconstructed offsets, no description tables) and
+`.xdelta` patch synthesis (no multi-GB file).
+
 ### Tests (`web/tests/`, `npm test`)
 
 - `validate.mjs` — static: every JS file parses, the shell is wired, manifest/SW/CSS carry
