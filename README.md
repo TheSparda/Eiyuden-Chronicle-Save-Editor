@@ -4,8 +4,16 @@ A **save editor** for the Steam (PC) release of *Eiyuden Chronicle: Hundred Hero
 money, difficulty, your roster, character stats and gear, and your inventory — then have
 the save written back so the game loads it normally.
 
-It runs as a small local web app: **stdlib-only Python**, no install, no dependencies,
-nothing uploaded. Built in the same spirit as the
+There are two ways to run it, and **nothing is ever uploaded** either way — your save
+never leaves your device:
+
+- **[In your browser](https://thesparda.github.io/Eiyuden-Chronicle-Save-Editor/web/)** —
+  zero install, works on phones, installs as an offline app (PWA). See
+  [Use it in your browser](#use-it-in-your-browser).
+- **As a small local app** — **stdlib-only Python**, no dependencies. See [Run it
+  locally](#run-it-locally).
+
+Both drive the *same* verified save engine. Built in the same spirit as the
 [Suikoden IV Editor](https://github.com/TheSparda/Suikoden-4-Save-Editor) it's modeled on:
 **never write unverified data.**
 
@@ -13,7 +21,27 @@ Feature requests/Support avail on the Toran Castle Discord: https://discord.gg/K
 
 ---
 
-## Run
+## Use it in your browser
+
+**<https://thesparda.github.io/Eiyuden-Chronicle-Save-Editor/web/>**
+
+A zero-install, browser-based twin of the desktop editor. It runs the repo's own save
+module — `editor/ecsave.py` and `editor/pydes.py`, **unchanged** — inside
+[Pyodide](https://pyodide.org) (CPython on WebAssembly), so the exact same verified
+TripleDES + JSON round-trip happens client-side. **Your save file never leaves the
+browser.** It installs to a phone home screen and works offline after the first load.
+
+1. Open the link and wait for **"Engine ready"** (first load pulls the ~10 MB runtime).
+2. Drop a `UserDataNN.dat` file on the drop zone, or **Choose file…**
+3. Edit across the tabs, then **Write save** → an edited `.dat` downloads.
+4. **Close the game**, then copy the edited file back over the original.
+
+See [`web/README.md`](web/README.md) for the mobile-first UI, searchable pickers,
+review-before-write, and PWA sharing details.
+
+---
+
+## Run it locally
 
 Requires **Python 3.8+** and a modern browser.
 
@@ -239,9 +267,11 @@ you leave there.
 ## Layout
 
 ```
-Start Editor (Windows).bat   <- the only thing at the top level
+Start Editor (Windows).bat   <- desktop launcher
 README.md
-editor/
+.nojekyll                    <- lets GitHub Pages serve the editor/ .py files verbatim
+editor/                      <- the save engine + local web app (below)
+web/                         <- the browser (Pyodide + PWA) port; see web/README.md
 ```
 
 Everything else lives in `editor/`:
